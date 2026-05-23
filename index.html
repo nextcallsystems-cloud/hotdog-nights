@@ -89,7 +89,7 @@ const PAL = {
   // player
   k:"#14141f", h:"#3a2410", s:"#e8b88a", b:"#2e86c1", p:"#34495e",
   // hotdog
-  o:"#3a1d0e", n:"#e0a86b", r:"#c0392b", y:"#f4d03f", w:"#ffffff", l:"#5a2d10",
+  o:"#2a0f06", n:"#e0a86b", r:"#c0392b", d:"#8e2a1c", y:"#f4d03f", w:"#ffffff", t:"#fff2cf", l:"#5a2d10",
   // gun / crate
   c:"#34e7ff", g:"#888", a:"#caa24a", d:"#7a5a18",
 };
@@ -107,17 +107,25 @@ const SP_PLAYER = [
   ".kk..kk.",
   "........",
 ];
-const SP_HOTDOG = [
-  "...oooooo...",
-  ".oonnnnnnoo.",
-  "oonrrrrrrnoo",
-  "onrwoorroworn".slice(0,12), // 12 chars, eyes
-  "onrrrrrrrrno",
-  "onryyrryyrno",
-  "oonrrrrrrnoo",
-  ".oonnnnnnoo.",
-  "...oo..oo...",
-  "...l.l..l.l.".slice(0,12),
+const SP_HOTDOG = [   // tall upright hotdog monster (11 wide x 18)
+  "...ooooo...",
+  "..odrrrdo..",
+  ".odrrrrrdo.",
+  ".orrrrrrro.",
+  "orwwrrrwwro",  // angry eyes
+  "orworrrowro",  // pupils
+  "orrrrrrrrro",
+  "oroooooooro",
+  "orotototoro",  // jagged teeth
+  "oroooooooro",
+  ".orrrrrrro.",
+  ".nnrrrrrnn.",  // bun + mustard body
+  ".nnryrrrnn.",
+  ".nnrrryrnn.",
+  ".nnryrrrnn.",
+  ".nnrrrrrnn.",
+  "..nnrrrnn..",
+  "..ll...ll..",  // stubby legs
 ];
 const SP_GUN = [
   "........",
@@ -438,12 +446,15 @@ function render(){
   }
   // hotdog menace glow + eyes
   for (const hd of hotdogs){ if (hd.dead) continue;
-    const hx=hd.x-camX, hy=hd.y-camY;
-    const rg=ctx.createRadialGradient(hx,hy,2,hx,hy,46);
-    rg.addColorStop(0,"rgba(180,30,30,0.55)"); rg.addColorStop(1,"rgba(180,30,30,0)");
-    ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(hx,hy,46,0,7); ctx.fill();
-    ctx.fillStyle="#ff5a5a"; const ex=8*(hd.flip<0?-1:1);
-    ctx.fillRect(hx-ex-2,hy-6,3,3); ctx.fillRect(hx+ex-1,hy-6,3,3);
+    const hx=hd.x-camX, hy=hd.y-camY, ey=hy-14;
+    const rg=ctx.createRadialGradient(hx,hy,2,hx,hy,52);
+    rg.addColorStop(0,"rgba(180,30,30,0.5)"); rg.addColorStop(1,"rgba(180,30,30,0)");
+    ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(hx,hy,52,0,7); ctx.fill();
+    // glowing red eyes high on the face
+    const eg=ctx.createRadialGradient(hx,ey,0,hx,ey,20);
+    eg.addColorStop(0,"rgba(255,40,40,0.55)"); eg.addColorStop(1,"rgba(255,40,40,0)");
+    ctx.fillStyle=eg; ctx.beginPath(); ctx.arc(hx,ey,20,0,7); ctx.fill();
+    ctx.fillStyle="#ff2a2a"; ctx.fillRect(hx-9,ey,4,4); ctx.fillRect(hx+5,ey,4,4);
   }
   // gun pickup beacon
   if (gun){ const gx=gun.x-camX, gy=gun.y-camY;
