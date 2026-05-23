@@ -380,12 +380,18 @@ function render(){
   for(let ty=ty0;ty<=ty1;ty++) for(let tx=tx0;tx<=tx1;tx++){
     const sx=tx*TS-camX, sy=ty*TS-camY;
     if (tileSolid(tx,ty)){
-      ctx.fillStyle="#2a2a3e"; ctx.fillRect(sx,sy,TS,TS);
-      ctx.fillStyle="#3d3d57"; ctx.fillRect(sx,sy,TS,3);
-      ctx.fillStyle="#1a1a28"; ctx.fillRect(sx,sy+TS-3,TS,3);
+      // raised solid block: bright top cap + side bevels + dark base = clearly "wall"
+      ctx.fillStyle="#4a4a68"; ctx.fillRect(sx,sy,TS,TS);
+      ctx.fillStyle="#74749c"; ctx.fillRect(sx,sy,TS,6);          // top highlight
+      ctx.fillStyle="#5c5c82"; ctx.fillRect(sx,sy,6,TS);          // left bevel
+      ctx.fillStyle="#23233a"; ctx.fillRect(sx,sy+TS-6,TS,6);     // bottom shadow
+      ctx.fillStyle="#1a1a28"; ctx.fillRect(sx+TS-4,sy,4,TS);     // right shadow
+      ctx.strokeStyle="#15151f"; ctx.lineWidth=1; ctx.strokeRect(sx+0.5,sy+0.5,TS-1,TS-1);
     } else {
+      // flat walkable floor: darker, with a clear inset grid tile
       ctx.fillStyle=zoneColorAt(tx,ty); ctx.fillRect(sx,sy,TS,TS);
-      ctx.strokeStyle="rgba(255,255,255,0.03)"; ctx.strokeRect(sx,sy,TS,TS);
+      ctx.fillStyle="rgba(0,0,0,0.18)"; ctx.fillRect(sx+2,sy+2,TS-4,TS-4);
+      ctx.strokeStyle="rgba(255,255,255,0.05)"; ctx.lineWidth=1; ctx.strokeRect(sx+0.5,sy+0.5,TS-1,TS-1);
     }
   }
   // zone labels
@@ -423,6 +429,13 @@ function render(){
 
   // ===== EMISSIVE (drawn through dark) =====
   ctx.save(); ctx.globalCompositeOperation="lighter";
+  // faint neon wall glow so obstacles are always readable in the dark
+  for(let ty=ty0;ty<=ty1;ty++) for(let tx=tx0;tx<=tx1;tx++){
+    if(!tileSolid(tx,ty)) continue;
+    const sx=tx*TS-camX, sy=ty*TS-camY;
+    ctx.fillStyle="rgba(86,96,150,0.16)"; ctx.fillRect(sx,sy,TS,TS);        // dim body
+    if(!tileSolid(tx,ty-1)){ ctx.fillStyle="rgba(150,180,255,0.42)"; ctx.fillRect(sx,sy,TS,2); } // lit top edge
+  }
   // hotdog menace glow + eyes
   for (const hd of hotdogs){ if (hd.dead) continue;
     const hx=hd.x-camX, hy=hd.y-camY;
@@ -450,6 +463,8 @@ function render(){
     ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(bx,by,10,0,7); ctx.fill(); }
   ctx.restore();
 
+  if (state==="play"||state==="pause") drawReticle();
+  cv.style.cursor = (state==="play"||state==="pause") ? "none" : "default";
   drawHUD();
   if (state==="title") drawTitle();
   if (state==="intro") drawIntro();
@@ -464,17 +479,36 @@ function drawLighting(){
   const px=player.x-camX, py=player.y-camY;
   lctx.globalCompositeOperation="destination-out";
   // ambient
-  let g=lctx.createRadialGradient(px,py,4,px,py,150);
-  g.addColorStop(0,"rgba(0,0,0,0.95)"); g.addColorStop(1,"rgba(0,0,0,0)");
-  lctx.fillStyle=g; lctx.beginPath(); lctx.arc(px,py,150,0,7); lctx.fill();
+  let g=lctx.createRadialGradient(px,py,4,px,py,180);
+  g.addColorStop(0,"rgba(0,0,0,0.95)"); g.addColorStop(0.7,"rgba(0,0,0,0.6)"); g.addColorStop(1,"rgba(0,0,0,0)");
+  lctx.fillStyle=g; lctx.beginPath(); lctx.arc(px,py,180,0,7); lctx.fill();
   // flashlight cone toward aim
-  const a=player.aim, len=340, spread=0.5;
+  const a=player.aim, len=360, spread=0.62;
   lctx.beginPath(); lctx.moveTo(px,py); lctx.arc(px,py,len,a-spread,a+spread); lctx.closePath();
   let cg=lctx.createRadialGradient(px,py,10,px,py,len);
   cg.addColorStop(0,"rgba(0,0,0,1)"); cg.addColorStop(0.65,"rgba(0,0,0,0.55)"); cg.addColorStop(1,"rgba(0,0,0,0)");
   lctx.fillStyle=cg; lctx.fill();
   lctx.globalCompositeOperation="source-over";
   ctx.drawImage(lcv,0,0);
+}
+
+//============================================================ RETICLE
+function drawReticle(){
+  const x=mouseX, y=mouseY;
+  ctx.save(); ctx.globalCompositeOperation="lighter";
+  // sight line from the player to where you're aiming
+  if (player.armed){ const px=player.x-camX, py=player.y-camY;
+    ctx.strokeStyle="rgba(52,231,255,0.22)"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(x,y); ctx.stroke(); }
+  // crosshair
+  ctx.strokeStyle="#34e7ff"; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(x,y,9,0,7); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x-15,y); ctx.lineTo(x-5,y); ctx.moveTo(x+5,y); ctx.lineTo(x+15,y);
+  ctx.moveTo(x,y-15); ctx.lineTo(x,y-5); ctx.moveTo(x,y+5); ctx.lineTo(x,y+15);
+  ctx.stroke();
+  ctx.fillStyle="#ffffff"; ctx.fillRect(x-1,y-1,2,2);
+  ctx.restore();
 }
 
 //============================================================ HUD
