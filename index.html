@@ -3,6 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#05050b">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>HOTDOG NIGHTS - Xtreme Action Park</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -53,6 +60,7 @@ addEventListener("keydown", e => {
   if (k === "m") muted = !muted;
   if (k === "s" && state === "title") openSettings("title");
   if (k === "o" && state === "pause") openSettings("pause");
+  if (k === "f") toggleFullscreen();
   if (/^[1-9]$/.test(k) && player.weapons){ const i = +k-1; if (i < player.weapons.length) player.weapon = i; }
 });
 function handleNameKey(e){
@@ -257,6 +265,7 @@ function farPoint(){ let p; for(let i=0;i<60;i++){ p=freeWorldPoint(); if(Math.h
 let state="title", night=1, score=0, storyPage=0;
 let best=parseInt(localStorage.getItem("hotdogNights.best")||"0",10);
 let playerName=localStorage.getItem("hotdogNights.name")||"";
+const VERSION="v7";
 const player={ x:0,y:0,r:11,hp:100,maxHp:100,speedMul:1,ammoBonus:0,armed:false,aim:-Math.PI/2,lastHit:-10,fireCd:0,ammo:0,flip:1,
   weapons:[],weapon:0,newWeapon:null };
 let boss=null, bullets=[], globs=[], packets=[], parts=[], crates=[], gun=null;
@@ -355,6 +364,10 @@ function startOrAdvance(){ audioInit();
   else if(state==="win"){ state="title"; }
 }
 function togglePause(){ if(state==="play"){ state="pause"; resetSticks(); } else if(state==="pause") state="play"; }
+function toggleFullscreen(){ const el=document.documentElement, fs=document.fullscreenElement||document.webkitFullscreenElement;
+  if(!fs){ const req=el.requestFullscreen||el.webkitRequestFullscreen; if(req) req.call(el);
+    if(screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(()=>{}); }
+  else { const ex=document.exitFullscreen||document.webkitExitFullscreen; if(ex) ex.call(document); } }
 
 //============================================================ HELPERS
 function burst(x,y,n,color,spd=4,life=0.5,size=3){ for(let i=0;i<n;i++){ const a=Math.random()*6.28,s=Math.random()*spd;
@@ -608,7 +621,8 @@ function drawHUD(){
       wx+=80; });
     ctx.fillStyle=player.ammo>0?"#34e7ff":"#ff3b3b"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText("AMMO "+player.ammo, wx+6, H-19);
   } else { ctx.fillStyle="#ffb74d"; ctx.font="bold 15px Trebuchet MS"; ctx.fillText("> Reach the LASER TAG ARENA and grab the gun!", 300, H-21); }
-  if(isTouch && state==="play"){ pushBtn(hudButtons, W-52, 44, 42, 32, "II", togglePause); drawBtn(hudButtons[hudButtons.length-1]); }
+  if(isTouch && state==="play"){ pushBtn(hudButtons, W-52, 44, 42, 32, "II", togglePause); drawBtn(hudButtons[hudButtons.length-1]);
+    pushBtn(hudButtons, W-100, 44, 42, 32, "[ ]", toggleFullscreen); drawBtn(hudButtons[hudButtons.length-1]); }
 }
 function dim(){ ctx.fillStyle="rgba(5,5,12,0.82)"; ctx.fillRect(0,0,W,H); }
 function drawCenter(title,sub,color){ dim(); ctx.textAlign="center";
@@ -618,11 +632,13 @@ function drawTitle(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
   ctx.fillStyle="#ff3b3b"; ctx.font="bold 60px Trebuchet MS"; ctx.fillText("HOTDOG NIGHTS", W/2, H/2-78);
   ctx.fillStyle="#34e7ff"; ctx.font="bold 24px Trebuchet MS"; ctx.fillText(">>  XTREME ACTION PARK  <<", W/2, H/2-42);
   ctx.fillStyle="#cfcfe0"; ctx.font="16px Trebuchet MS"; ctx.fillText("The mascot wakes at midnight. Five nights. One hotdog. Survive.", W/2, H/2+2);
-  if(isTouch){ pushBtn(uiButtons, W/2-90, H/2+38, 180, 44, "PLAY", ()=>startOrAdvance());
-    pushBtn(uiButtons, W/2-90, H/2+94, 180, 40, "SETTINGS", ()=>openSettings("title")); uiButtons.forEach(drawBtn); }
-  else { ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  ENTER to play       S for settings", W/2, H/2+62);
+  if(isTouch){ pushBtn(uiButtons, W/2-90, H/2+30, 180, 42, "PLAY", ()=>startOrAdvance());
+    pushBtn(uiButtons, W/2-186, H/2+82, 180, 38, "SETTINGS", ()=>openSettings("title"));
+    pushBtn(uiButtons, W/2+6, H/2+82, 180, 38, "FULLSCREEN", ()=>toggleFullscreen()); uiButtons.forEach(drawBtn); }
+  else { ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  ENTER to play       S settings       F fullscreen", W/2, H/2+62);
     ctx.fillStyle="#5a5a7a"; ctx.font="13px Trebuchet MS"; ctx.fillText("WASD move | mouse aim | click/space shoot | 1-4 swap weapon | P pause | M mute", W/2, H/2+100); }
-  if(best>0){ ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Best night reached: "+best, W/2, H/2+150); } }
+  if(best>0){ ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Best night reached: "+best, W/2, H/2+150); }
+  ctx.fillStyle="#3a3a52"; ctx.font="11px Trebuchet MS"; ctx.textAlign="right"; ctx.fillText("build "+VERSION, W-10, H-10); ctx.textAlign="left"; }
 function drawName(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
   ctx.fillStyle="#34e7ff"; ctx.font="bold 32px Trebuchet MS"; ctx.fillText("WHO'S WORKING TONIGHT?", W/2, H/2-58);
   ctx.fillStyle="#cfcfe0"; ctx.font="15px Trebuchet MS"; ctx.fillText(isTouch?"Tap the box, type, then START":"Type your name, then press ENTER", W/2, H/2-26);
@@ -657,7 +673,8 @@ function drawWin(){ dim(); ctx.textAlign="center";
 function drawPause(){ drawCenter("PAUSED", isTouch?"":"Press P to resume","#34e7ff"); uiButtons.length=0;
   if(isTouch){ pushBtn(uiButtons, W/2-160,H/2+48,150,44,"RESUME",()=>togglePause());
     pushBtn(uiButtons, W/2+10,H/2+48,150,44,"OPTIONS",()=>openSettings("pause"));
-    pushBtn(uiButtons, W/2-75,H/2+106,150,40, muted?"UNMUTE":"MUTE", ()=>muted=!muted);
+    pushBtn(uiButtons, W/2-160,H/2+106,150,40, muted?"UNMUTE":"MUTE", ()=>muted=!muted);
+    pushBtn(uiButtons, W/2+10,H/2+106,150,40, "FULLSCREEN", ()=>toggleFullscreen());
     uiButtons.forEach(drawBtn); }
   else { ctx.textAlign="center"; ctx.fillStyle="#7a7a9a"; ctx.font="14px Trebuchet MS"; ctx.fillText("O: Options      M: "+(muted?"Unmute":"Mute"), W/2, H/2+74); } }
 function drawSettings(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
