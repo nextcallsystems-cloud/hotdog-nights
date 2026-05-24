@@ -121,6 +121,7 @@ const sfx = {
   splat: () => { noise(0.14, 0.35, 700); beep(160, 0.16, "sawtooth", 0.3, 60); },
   pop:   () => beep(300, 0.06, "square", 0.3, 150),
   bosshit:()=> beep(240, 0.04, "square", 0.18, 200),
+  hurt:  () => { noise(0.09, 0.24, 1300); beep(150, 0.12, "sawtooth", 0.34, 55); },
   kill:  () => { beep(180,0.25,"sawtooth",0.5,40); setTimeout(()=>beep(120,0.3,"sawtooth",0.5,30),120); [523,659,880].forEach((f,i)=>setTimeout(()=>beep(f,0.2,"square",0.4),200+i*120)); },
   win:   () => [523,659,784,1046,1318].forEach((f,i)=>setTimeout(()=>beep(f,0.2,"square",0.5),i*150)),
   lose:  () => [330,247,165,110].forEach((f,i)=>setTimeout(()=>beep(f,0.35,"sawtooth",0.5,f*0.6),i*200)),
@@ -133,6 +134,7 @@ const PAL = {
   c:"#34e7ff", g:"#888", a:"#caa24a", e:"#7a5a18",
 };
 const SP_PLAYER = ["..kkkk..",".khhhhk.",".kssssk.",".kssssk.",".kbbbbk.","kbbbbbbk","kbbbbbbk",".kbbbbk.",".kp..pk.",".kp..pk.",".kk..kk.","........"];
+const SP_FREEFORMS = ["..h.h.h.h..",".hhhhhhhhh.","hh.hhhhh.hh","h.hhhhhhh.h",".hh.h.h.hh.","h..h.h.h..h","...h...h..."];
 const SP_HOTDOG = ["...ooooo...","..odrrrdo..",".odrrrrrdo.",".orrrrrrro.","orwwrrrwwro","orworrrowro","orrrrrrrrro","oroooooooro","orotototoro","oroooooooro",".orrrrrrro.",".nnrrrrrnn.",".nnryrrrnn.",".nnrrryrnn.",".nnryrrrnn.",".nnrrrrrnn.","..nnrrrnn..","..ll...ll.."];
 const SP_GUN = ["........","..cccc..",".cccccg.","ccccccgg",".cc..ggg",".gg.....",".gg.....","........"];
 const SP_CRATE = ["eeeeee","eaaaae","eaeaea","eaeaea","eaaaae","eeeeee"];
@@ -143,6 +145,9 @@ function drawSprite(grid, cx, cy, scale, flip=1, ov=null){
       const color=(ov&&ov[ch])||PAL[ch]; if (!color) continue; ctx.fillStyle=color;
       const dx = flip<0 ? ox+(gw-1-col)*scale : ox+col*scale;
       ctx.fillRect(Math.round(dx), Math.round(oy+row*scale), scale, scale); } }
+}
+function drawMoonkFreeforms(cx, cy, scale, flip=1, ov=null){
+  drawSprite(SP_FREEFORMS, cx, cy-4*scale, scale, flip, ov);
 }
 // Cached radial-glow images: building gradients every frame was the main slowdown.
 const glowCache = new Map();
@@ -235,7 +240,7 @@ function handleSettingsKey(e){ const k=e.key;
   e.preventDefault();
 }
 const CHARS = [
-  {name:"MAURICE", b:"#2e86c1", h:"#3a2410", perk:"All-rounder"},
+  {name:"MOONK",   b:"#111827", h:"#050505", s:"#5a3520", p:"#07090d", perk:"OP: all guns, endless ammo, regen", hpBonus:400, speedMul:1.55, ammoBonus:999, ammoMax:999, damageMul:5, fireMul:0.45, resist:0.18, regen:18, ammoInfinite:true, startAllWeapons:true, moonk:true},
   {name:"BLAZE",   b:"#e74c3c", h:"#16110f", perk:"+15% move speed", speedMul:1.15},
   {name:"VERDE",   b:"#27ae60", h:"#3a2410", perk:"+25 max HP", hpBonus:25},
   {name:"NOVA",    b:"#9b59b6", h:"#efd6b6", perk:"+60 start ammo", ammoBonus:60},
@@ -274,8 +279,15 @@ const BEAT = {
 
 function beginRun(){ const ch=CHARS[charSel]||CHARS[0];
   player.maxHp=100+(ch.hpBonus||0); player.speedMul=ch.speedMul||1; player.ammoBonus=ch.ammoBonus||0;
+  player.ammoMax=ch.ammoMax||AMMO_MAX; player.damageMul=ch.damageMul||1; player.fireMul=ch.fireMul||1;
+  player.resist=ch.resist||1; player.regen=ch.regen||0; player.ammoInfinite=!!ch.ammoInfinite;
+  player.startAllWeapons=!!ch.startAllWeapons; player.moonk=!!ch.moonk;
   night=1; score=0; player.hp=player.maxHp; player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0;
   startNight(1); state="intro"; introTimer=2.6; }
+function unlockAllWeapons(label="FULL ARSENAL"){
+  player.weapons=["pistol","smg","shotgun","plasma"]; player.weapon=3;
+  player.newWeapon={name:label, key:"1-4"};
+}
 function grantFor(n){ const map={2:"smg",3:"shotgun",4:"plasma"}; const id=map[n]; if(!id) return;
   if(!player.weapons.includes(id)){ player.weapons.push(id); player.weapon=player.weapons.length-1;
     player.newWeapon={name:WEAPONS[id].name, key:player.weapons.length}; } }
@@ -283,7 +295,8 @@ function startNight(n){
   night=n; const c=cfg(n); buildMap();
   player.x=22*TS+TS/2; player.y=16*TS+TS/2; player.fireCd=0; player.newWeapon=null; player.lastHit=-10;
   if(n===1){ player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0; gun={x:36*TS+TS/2,y:7*TS+TS/2,t:0}; }
-  else { player.armed=true; gun=null; grantFor(n); player.ammo=Math.min(AMMO_MAX, player.ammo+NIGHT_REFILL); }
+  else { player.armed=true; gun=null; if(player.startAllWeapons) unlockAllWeapons("MOONK MODE"); else grantFor(n);
+    player.ammo=player.ammoInfinite ? player.ammoMax : Math.min(player.ammoMax, player.ammo+NIGHT_REFILL); }
   const p=farPoint();
   boss={ x:p.x,y:p.y,r:20,hp:c.hp,maxHP:c.hp,wobble:Math.random()*6,growlT:1,flip:1,
          atkP:c.packetEvery*0.7, atkS:c.shootEvery, tele:0, enraged:false, hitFlash:0, dead:false };
@@ -301,6 +314,13 @@ function togglePause(){ if(state==="play") state="pause"; else if(state==="pause
 //============================================================ HELPERS
 function burst(x,y,n,color,spd=4,life=0.5,size=3){ for(let i=0;i<n;i++){ const a=Math.random()*6.28,s=Math.random()*spd;
   parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life,max:life,color,size}); } }
+function hurtPlayer(amount, hitShake){
+  const dmg=Math.max(1, amount*(player.resist||1));
+  player.hp-=dmg; player.lastHit=nightTime; shake=hitShake; sfx.hurt();
+  if(player.moonk) burst(player.x,player.y,10,"#34e7ff",5,0.25,2);
+  if(player.hp<=0){ player.hp=0; gameOver(); return true; }
+  return false;
+}
 function gameOver(){ state="over"; firing=false; sfx.lose(); if(night>best){ best=night; localStorage.setItem("hotdogNights.best",String(best)); } }
 function winGame(){ state="win"; firing=false; sfx.win(); if(5>best){ best=5; localStorage.setItem("hotdogNights.best","5"); }
   parts=[]; for(let i=0;i<90;i++) parts.push({x:Math.random()*WORLD_W,y:Math.random()*WORLD_H,vx:(Math.random()-0.5)*3,vy:(Math.random()-0.5)*3,life:2.4,max:2.4,color:["#ff3b3b","#34e7ff","#f4d03f","#fff"][i%4],size:4}); }
@@ -330,22 +350,27 @@ function update(dt){
   if(keys["a"]||keys["arrowleft"]) dx-=1;
   if(keys["d"]||keys["arrowright"]) dx+=1;
   if(dx||dy){ const m=Math.hypot(dx,dy), sp=SPEED*player.speedMul*f; moveEntity(player,dx/m*sp,dy/m*sp); }
+  if(player.regen && player.hp<player.maxHp) player.hp=Math.min(player.maxHp, player.hp+player.regen*dt);
 
   // gun pickup
   if(gun){ gun.t+=dt; if(Math.hypot(gun.x-player.x,gun.y-player.y)<28){
-    player.armed=true; player.weapons=["pistol"]; player.weapon=0; player.ammo=START_AMMO+player.ammoBonus; gun=null; sfx.pickup();
-    burst(player.x,player.y,24,"#34e7ff",5,0.6,3); } }
+    player.armed=true; gun=null; sfx.pickup();
+    if(player.startAllWeapons){ unlockAllWeapons("MOONK MODE"); player.ammo=player.ammoMax; }
+    else { player.weapons=["pistol"]; player.weapon=0; player.ammo=Math.min(player.ammoMax, START_AMMO+player.ammoBonus); }
+    burst(player.x,player.y,player.moonk?46:24,player.moonk?"#f4d03f":"#34e7ff",7,0.7,3); } }
 
   // shooting
   const wpn = player.armed ? WEAPONS[player.weapons[player.weapon]] : null;
   if((firing||keys[" "]) && wpn && player.fireCd<=0){
-    if(player.ammo>=wpn.cost){ player.ammo-=wpn.cost; player.fireCd=wpn.cd;
+    const cost=player.ammoInfinite?0:wpn.cost;
+    if(player.ammo>=cost){ if(!player.ammoInfinite) player.ammo-=cost; player.fireCd=wpn.cd*player.fireMul;
       for(let i=0;i<wpn.pellets;i++){ const a=player.aim+(Math.random()-0.5)*wpn.spread;
-        bullets.push({x:player.x+Math.cos(a)*16,y:player.y+Math.sin(a)*16,vx:Math.cos(a)*wpn.speed,vy:Math.sin(a)*wpn.speed,life:0.7,dmg:wpn.dmg,pierce:wpn.pierce,color:wpn.color}); }
-      burst(player.x+Math.cos(player.aim)*18, player.y+Math.sin(player.aim)*18, 3, "#fff7b0", 3, 0.1, 2);
+        bullets.push({x:player.x+Math.cos(a)*16,y:player.y+Math.sin(a)*16,vx:Math.cos(a)*wpn.speed,vy:Math.sin(a)*wpn.speed,life:player.moonk?1.05:0.7,dmg:wpn.dmg*player.damageMul,pierce:wpn.pierce+(player.moonk?2:0),color:player.moonk?"#f4d03f":wpn.color}); }
+      burst(player.x+Math.cos(player.aim)*18, player.y+Math.sin(player.aim)*18, player.moonk?9:3, player.moonk?"#34e7ff":"#fff7b0", player.moonk?6:3, 0.1, 2);
       sfx[wpn.sound]();
     } else { player.fireCd=0.25; sfx.empty(); }
   }
+  if(player.ammoInfinite) player.ammo=player.ammoMax;
 
   // bullets
   for(const b of bullets){ b.x+=b.vx*f; b.y+=b.vy*f; b.life-=dt;
@@ -374,10 +399,10 @@ function update(dt){
     boss.flip=Math.cos(ang)<0?-1:1;
     moveEntity(boss, Math.cos(ang)*sp, Math.sin(ang)*sp+bob);
     if(Math.hypot(boss.x-player.x,boss.y-player.y)<boss.r+player.r){
-      if(nightTime-player.lastHit>0.8){ player.hp-=c.contact; player.lastHit=nightTime; shake=0.4; sfx.hurt();
+      if(nightTime-player.lastHit>0.8){ if(hurtPlayer(c.contact,0.4)) return;
         burst(player.x,player.y,10,"#ff2d2d",4,0.4,3);
         const ka=Math.atan2(player.y-boss.y,player.x-boss.x); moveEntity(player,Math.cos(ka)*24,Math.sin(ka)*24);
-        if(player.hp<=0){ player.hp=0; gameOver(); return; } } }
+      } }
     if(c.packets){ boss.atkP-=dt; if(boss.atkP<=0){ const n=c.packetBurst+(enr?1:0);
       for(let i=0;i<n && packets.length<10;i++){ const a=Math.random()*6.28, d=24+Math.random()*16;
         packets.push({x:boss.x+Math.cos(a)*d,y:boss.y+Math.sin(a)*d,r:9,dead:false,wob:Math.random()*6}); }
@@ -389,22 +414,22 @@ function update(dt){
   // ketchup globs
   for(const g of globs){ g.x+=g.vx*f; g.y+=g.vy*f; g.life-=dt;
     if(collides(g.x,g.y,3)){ g.life=0; burst(g.x,g.y,8,"#b01818",3,0.4,3); continue; }
-    if(Math.hypot(g.x-player.x,g.y-player.y)<player.r+g.r){ g.life=0; player.hp-=g.dmg; player.lastHit=nightTime; shake=0.3; sfx.hurt();
-      burst(player.x,player.y,12,"#c0392b",4,0.5,3); if(player.hp<=0){ player.hp=0; gameOver(); return; } } }
+    if(Math.hypot(g.x-player.x,g.y-player.y)<player.r+g.r){ g.life=0; if(hurtPlayer(g.dmg,0.3)) return;
+      burst(player.x,player.y,12,"#c0392b",4,0.5,3); } }
   globs=globs.filter(g=>g.life>0);
 
   // packet minions
   for(const pk of packets){ if(pk.dead) continue; pk.wob+=dt*10;
     const a=Math.atan2(player.y-pk.y,player.x-pk.x), sp=1.25*(boss&&boss.enraged?1.3:1)*f;
     moveEntity(pk, Math.cos(a)*sp, Math.sin(a)*sp);
-    if(Math.hypot(pk.x-player.x,pk.y-player.y)<player.r+pk.r){ pk.dead=true; player.hp-=8; player.lastHit=nightTime; shake=0.2; sfx.pop();
-      burst(player.x,player.y,8,"#c0392b",3,0.4,2); if(player.hp<=0){ player.hp=0; gameOver(); return; } } }
+    if(Math.hypot(pk.x-player.x,pk.y-player.y)<player.r+pk.r){ pk.dead=true; sfx.pop(); if(hurtPlayer(8,0.2)) return;
+      burst(player.x,player.y,8,"#c0392b",3,0.4,2); } }
   packets=packets.filter(p=>!p.dead);
 
   // ammo crates
   if(player.armed){ crateTimer-=dt; if(crateTimer<=0 && crates.length<2){ const p=freeWorldPoint(); crates.push({x:p.x,y:p.y}); crateTimer=10; }
     for(let i=crates.length-1;i>=0;i--){ const cr=crates[i];
-      if(Math.hypot(cr.x-player.x,cr.y-player.y)<26){ player.ammo=Math.min(AMMO_MAX,player.ammo+CRATE_AMMO); crates.splice(i,1); sfx.ammo(); burst(player.x,player.y,12,"#f4d03f",4,0.4,3); } } }
+      if(Math.hypot(cr.x-player.x,cr.y-player.y)<26){ player.ammo=Math.min(player.ammoMax,player.ammo+CRATE_AMMO); crates.splice(i,1); sfx.ammo(); burst(player.x,player.y,12,"#f4d03f",4,0.4,3); } } }
 
   // particles + clock
   for(const p of parts){ p.x+=p.vx*f; p.y+=p.vy*f; p.vx*=0.92; p.vy*=0.92; p.life-=dt; }
@@ -454,7 +479,13 @@ function render(){
     if(boss.hitFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,boss.hitFlash*6); ctx.fillStyle="#fff"; ctx.fillRect(bx-22,by-36,44,72); ctx.restore(); } }
 
   // player
+  if(player.moonk){ const px=player.x-camX, py=player.y-camY;
+    ctx.save(); ctx.globalCompositeOperation="lighter";
+    glow(px, py, 58, "rgba(52,231,255,0.34)"); glow(px, py, 34, "rgba(244,208,63,0.28)");
+    ctx.strokeStyle="rgba(244,208,63,0.72)"; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(px,py,24+Math.sin(performance.now()/90)*3,0,7); ctx.stroke(); ctx.restore(); }
   drawSprite(SP_PLAYER, player.x-camX, player.y-camY, 3, player.flip, CHARS[charSel]);
+  if(player.moonk) drawMoonkFreeforms(player.x-camX, player.y-camY, 3, player.flip, CHARS[charSel]);
   if(player.armed){ const a=player.aim, bx=player.x-camX, by=player.y-camY;
     ctx.strokeStyle="#9a9aae"; ctx.lineWidth=4; ctx.lineCap="round";
     ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+Math.cos(a)*20,by+Math.sin(a)*20); ctx.stroke();
@@ -518,7 +549,8 @@ function wrap(text,max){ const words=text.split(" "); let line="",out=[]; for(co
 function drawHUD(){
   ctx.textAlign="left"; ctx.fillStyle="rgba(5,5,15,0.7)"; ctx.fillRect(0,0,W,40);
   ctx.fillStyle="#ff3b3b"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText("NIGHT "+night, 16, 27);
-  if(playerName){ ctx.fillStyle="#7a7a9a"; ctx.font="12px Trebuchet MS"; ctx.fillText(playerName.toUpperCase(), 110, 26); }
+  if(playerName){ ctx.fillStyle=player.moonk?"#f4d03f":"#7a7a9a"; ctx.font="12px Trebuchet MS"; ctx.fillText(playerName.toUpperCase(), 110, 26); }
+  if(player.moonk){ ctx.fillStyle="#34e7ff"; ctx.font="bold 12px Trebuchet MS"; ctx.fillText("MOONK MODE", 110, 38); }
   const prog=Math.min(1,nightTime/NIGHT_LEN), hr=Math.floor(prog*6), label=(hr<=0?12:hr)+" AM";
   ctx.fillStyle="#e8e8f0"; ctx.font="bold 16px Trebuchet MS"; ctx.textAlign="center"; ctx.fillText(label, W/2, 17);
   ctx.fillStyle="#1a1a2e"; ctx.fillRect(W/2-90,22,180,4); ctx.fillStyle="#9a7bff"; ctx.fillRect(W/2-90,22,180*prog,4);
@@ -543,7 +575,7 @@ function drawHUD(){
     player.weapons.forEach((id,i)=>{ const on=i===player.weapon;
       ctx.fillStyle=on?"#34e7ff":"#222a3a"; ctx.fillRect(wx,H-36,74,22);
       ctx.fillStyle=on?"#04121a":"#90a0b8"; ctx.font="bold 11px Trebuchet MS"; ctx.fillText((i+1)+" "+WEAPONS[id].name, wx+5, H-21); wx+=80; });
-    ctx.fillStyle=player.ammo>0?"#34e7ff":"#ff3b3b"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText("AMMO "+player.ammo, wx+6, H-19);
+    ctx.fillStyle=player.ammo>0?"#34e7ff":"#ff3b3b"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText(player.ammoInfinite?"AMMO UNLIMITED":"AMMO "+player.ammo, wx+6, H-19);
   } else { ctx.fillStyle="#ffb74d"; ctx.font="bold 15px Trebuchet MS"; ctx.fillText("> Reach the LASER TAG ARENA and grab the gun!", 300, H-21); }
 }
 function dim(){ ctx.fillStyle="rgba(5,5,12,0.82)"; ctx.fillRect(0,0,W,H); }
@@ -607,6 +639,7 @@ function drawCharSelect(){ dim(); ctx.textAlign="center";
   CHARS.forEach((c,i)=>{ const x=gap*(i+1), y=H/2-10, on=i===charSel;
     if(on){ ctx.fillStyle="rgba(52,231,255,0.12)"; ctx.fillRect(x-58,y-92,116,176); ctx.strokeStyle="#34e7ff"; ctx.lineWidth=2; ctx.strokeRect(x-58,y-92,116,176); }
     drawSprite(SP_PLAYER, x, y-34, 5, 1, c);
+    if(c.moonk) drawMoonkFreeforms(x, y-34, 5, 1, c);
     ctx.fillStyle=on?"#f4d03f":"#cfcfe0"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText(c.name, x, y+44);
     ctx.fillStyle=on?"#9fefff":"#7a7a9a"; ctx.font="12px Trebuchet MS"; wrap(c.perk,108).forEach((ln,j)=>ctx.fillText(ln,x,y+64+j*15)); });
   ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Left/Right to choose    ENTER to confirm    ESC to go back", W/2, H-46); }
