@@ -2,23 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>HOTDOG NIGHTS - Xtreme Action Park</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { height:100%; background:#05050b; color:#e8e8f0;
-    font-family:"Trebuchet MS","Segoe UI",sans-serif; overflow:hidden; }
+    font-family:"Trebuchet MS","Segoe UI",sans-serif; overflow:hidden;
+    overscroll-behavior:none; touch-action:none; -webkit-user-select:none; user-select:none;
+    -webkit-tap-highlight-color:transparent; }
   #wrap { width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
   canvas { background:#05050b; image-rendering:pixelated; image-rendering:crisp-edges;
     max-width:100%; max-height:100%; box-shadow:0 0 60px rgba(255,59,59,.25),0 0 120px rgba(52,231,255,.15);
     border:2px solid #1a1a2e; touch-action:none; cursor:crosshair; }
   #hint { position:fixed; bottom:8px; left:0; right:0; text-align:center;
     font-size:12px; color:#5a5a7a; pointer-events:none; }
+  #nm { position:fixed; left:50%; top:46%; transform:translate(-50%,-50%); width:280px; padding:10px 12px;
+    font:bold 20px "Trebuchet MS",sans-serif; text-align:center; background:#101018; color:#fff;
+    border:2px solid #34e7ff; border-radius:6px; display:none; z-index:10; outline:none; }
 </style>
 </head>
 <body>
 <div id="wrap"><canvas id="game" width="960" height="600"></canvas></div>
-<div id="hint">WASD move &nbsp;&middot;&nbsp; Mouse aim &nbsp;&middot;&nbsp; Click/Space shoot &nbsp;&middot;&nbsp; 1-4 weapons &nbsp;&middot;&nbsp; P pause (O options) &nbsp;&middot;&nbsp; M mute</div>
+<input id="nm" type="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" maxlength="14" placeholder="your name">
+<div id="hint">WASD / on-screen sticks &middot; aim+fire &middot; 1-4 weapons &middot; P pause (O options) &middot; M mute</div>
 <script>
 (() => {
 "use strict";
@@ -63,6 +69,57 @@ addEventListener("mouseup", () => firing = false);
 cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { if (state==="play" && player.weapons.length>1){ e.preventDefault();
   player.weapon = (player.weapon + (e.deltaY>0?1:player.weapons.length-1)) % player.weapons.length; } }, {passive:false});
+
+//============================================================ TOUCH (phone / iPad)
+const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints>0;
+const touchMove = {id:null,ox:0,oy:0,kx:0,ky:0,vx:0,vy:0,mag:0,active:false};
+const touchAim  = {id:null,ox:0,oy:0,kx:0,ky:0,ang:0,mag:0,active:false};
+let uiButtons=[], hudButtons=[];   // rebuilt every frame by the draw fns (touch only)
+function tpos(t){ const r=cv.getBoundingClientRect(); return { x:(t.clientX-r.left)*(W/r.width), y:(t.clientY-r.top)*(H/r.height) }; }
+function hitBtn(list,p){ for(const b of list) if(p.x>=b.x&&p.x<=b.x+b.w&&p.y>=b.y&&p.y<=b.y+b.h) return b; return null; }
+function pushBtn(list,x,y,w,h,label,fn){ list.push({x,y,w,h,label,fn}); }
+function drawBtn(b){ ctx.fillStyle="rgba(18,28,46,0.9)"; ctx.fillRect(b.x,b.y,b.w,b.h);
+  ctx.strokeStyle="#34e7ff"; ctx.lineWidth=2; ctx.strokeRect(b.x,b.y,b.w,b.h);
+  ctx.fillStyle="#cfe8ff"; ctx.font="bold 15px Trebuchet MS"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText(b.label, b.x+b.w/2, b.y+b.h/2); ctx.textBaseline="alphabetic"; ctx.textAlign="left"; }
+function stickSet(s,p){ const dx=p.x-s.ox, dy=p.y-s.oy, mag=Math.hypot(dx,dy), R=70, D=12; s.mag=mag;
+  if(mag>D){ s.vx=dx/mag; s.vy=dy/mag; s.ang=Math.atan2(dy,dx); } else { s.vx=0; s.vy=0; }
+  s.kx = s.ox + (mag>R?dx/mag*R:dx); s.ky = s.oy + (mag>R?dy/mag*R:dy); }
+function resetSticks(){ touchMove.active=false; touchMove.vx=touchMove.vy=touchMove.mag=0;
+  touchAim.active=false; touchAim.mag=0; firing=false; }
+function handleTouchStart(id,p){
+  if(state==="play"){ const b=hitBtn(hudButtons,p); if(b){ b.fn(); return; }
+    if(p.x<W*0.5 && !touchMove.active){ Object.assign(touchMove,{id,ox:p.x,oy:p.y,kx:p.x,ky:p.y,vx:0,vy:0,mag:0,active:true}); }
+    else if(p.x>=W*0.5 && !touchAim.active){ Object.assign(touchAim,{id,ox:p.x,oy:p.y,kx:p.x,ky:p.y,ang:player.aim,mag:0,active:true}); }
+    return; }
+  const b=hitBtn(uiButtons,p); if(b){ b.fn(); return; }
+  if(state==="name"){ if(nm) nm.focus(); return; }
+  if(["title","story","intro","over","win"].includes(state)) startOrAdvance();
+}
+function handleTouchMove(id,p){ if(id===touchMove.id) stickSet(touchMove,p); if(id===touchAim.id) stickSet(touchAim,p); }
+function handleTouchEnd(id){ if(id===touchMove.id){ touchMove.active=false; touchMove.vx=touchMove.vy=touchMove.mag=0; }
+  if(id===touchAim.id){ touchAim.active=false; touchAim.mag=0; } }
+cv.addEventListener("touchstart", e=>{ e.preventDefault(); audioInit(); for(const t of e.changedTouches) handleTouchStart(t.identifier, tpos(t)); }, {passive:false});
+cv.addEventListener("touchmove",  e=>{ e.preventDefault(); for(const t of e.changedTouches) handleTouchMove(t.identifier, tpos(t)); }, {passive:false});
+cv.addEventListener("touchend",   e=>{ e.preventDefault(); for(const t of e.changedTouches) handleTouchEnd(t.identifier); }, {passive:false});
+cv.addEventListener("touchcancel",e=>{ for(const t of e.changedTouches) handleTouchEnd(t.identifier); }, {passive:false});
+// Native keyboard for the name screen on touch devices
+const nm = document.getElementById("nm");
+let nmShown=false;
+if(nm){ nm.addEventListener("input", ()=>{ playerName=nm.value.replace(/[^A-Za-z0-9 _!\-]/g,"").slice(0,14); if(nm.value!==playerName) nm.value=playerName; });
+  nm.addEventListener("keydown", e=>{ if(e.key==="Enter") confirmName(); }); }
+function confirmName(){ if(playerName.trim()){ playerName=playerName.trim(); localStorage.setItem("hotdogNights.name",playerName); state="charselect"; } }
+function syncNameInput(){ if(!isTouch||!nm) return;
+  if(state==="name" && !nmShown){ nm.style.display="block"; nm.value=playerName; setTimeout(()=>nm.focus(),0); nmShown=true; }
+  else if(state!=="name" && nmShown){ nm.style.display="none"; nm.blur(); nmShown=false; } }
+function drawTouchSticks(){ ctx.save(); ctx.lineWidth=3;
+  if(touchMove.active){ ctx.strokeStyle="rgba(52,231,255,0.35)"; ctx.beginPath(); ctx.arc(touchMove.ox,touchMove.oy,70,0,7); ctx.stroke();
+    ctx.fillStyle="rgba(52,231,255,0.45)"; ctx.beginPath(); ctx.arc(touchMove.kx,touchMove.ky,30,0,7); ctx.fill(); }
+  else { ctx.fillStyle="rgba(120,140,170,0.35)"; ctx.font="bold 13px Trebuchet MS"; ctx.textAlign="center"; ctx.fillText("MOVE", W*0.25, H-24); ctx.textAlign="left"; }
+  if(touchAim.active){ ctx.strokeStyle="rgba(255,80,80,0.4)"; ctx.beginPath(); ctx.arc(touchAim.ox,touchAim.oy,70,0,7); ctx.stroke();
+    ctx.fillStyle="rgba(255,80,80,0.5)"; ctx.beginPath(); ctx.arc(touchAim.kx,touchAim.ky,30,0,7); ctx.fill(); }
+  else { ctx.fillStyle="rgba(120,140,170,0.35)"; ctx.font="bold 13px Trebuchet MS"; ctx.textAlign="center"; ctx.fillText("AIM + FIRE", W*0.75, H-24); ctx.textAlign="left"; }
+  ctx.restore(); }
 
 //============================================================ AUDIO
 let actx=null, master=null, musicGain=null, sfxGain=null, muted=false, noiseBuf=null;
@@ -120,8 +177,8 @@ const sfx = {
   growl: (v=0.5) => { beep(66, 0.34, "sawtooth", v, 42); beep(52, 0.34, "square", v*0.5, 38); },
   splat: () => { noise(0.14, 0.35, 700); beep(160, 0.16, "sawtooth", 0.3, 60); },
   pop:   () => beep(300, 0.06, "square", 0.3, 150),
+  hurt:  () => { beep(150, 0.18, "sawtooth", 0.5, 55); noise(0.10, 0.25, 500); },
   bosshit:()=> beep(240, 0.04, "square", 0.18, 200),
-  hurt:  () => { noise(0.09, 0.24, 1300); beep(150, 0.12, "sawtooth", 0.34, 55); },
   kill:  () => { beep(180,0.25,"sawtooth",0.5,40); setTimeout(()=>beep(120,0.3,"sawtooth",0.5,30),120); [523,659,880].forEach((f,i)=>setTimeout(()=>beep(f,0.2,"square",0.4),200+i*120)); },
   win:   () => [523,659,784,1046,1318].forEach((f,i)=>setTimeout(()=>beep(f,0.2,"square",0.5),i*150)),
   lose:  () => [330,247,165,110].forEach((f,i)=>setTimeout(()=>beep(f,0.35,"sawtooth",0.5,f*0.6),i*200)),
@@ -134,7 +191,6 @@ const PAL = {
   c:"#34e7ff", g:"#888", a:"#caa24a", e:"#7a5a18",
 };
 const SP_PLAYER = ["..kkkk..",".khhhhk.",".kssssk.",".kssssk.",".kbbbbk.","kbbbbbbk","kbbbbbbk",".kbbbbk.",".kp..pk.",".kp..pk.",".kk..kk.","........"];
-const SP_FREEFORMS = ["..h.h.h.h..",".hhhhhhhhh.","hh.hhhhh.hh","h.hhhhhhh.h",".hh.h.h.hh.","h..h.h.h..h","...h...h..."];
 const SP_HOTDOG = ["...ooooo...","..odrrrdo..",".odrrrrrdo.",".orrrrrrro.","orwwrrrwwro","orworrrowro","orrrrrrrrro","oroooooooro","orotototoro","oroooooooro",".orrrrrrro.",".nnrrrrrnn.",".nnryrrrnn.",".nnrrryrnn.",".nnryrrrnn.",".nnrrrrrnn.","..nnrrrnn..","..ll...ll.."];
 const SP_GUN = ["........","..cccc..",".cccccg.","ccccccgg",".cc..ggg",".gg.....",".gg.....","........"];
 const SP_CRATE = ["eeeeee","eaaaae","eaeaea","eaeaea","eaaaae","eeeeee"];
@@ -145,9 +201,6 @@ function drawSprite(grid, cx, cy, scale, flip=1, ov=null){
       const color=(ov&&ov[ch])||PAL[ch]; if (!color) continue; ctx.fillStyle=color;
       const dx = flip<0 ? ox+(gw-1-col)*scale : ox+col*scale;
       ctx.fillRect(Math.round(dx), Math.round(oy+row*scale), scale, scale); } }
-}
-function drawMoonkFreeforms(cx, cy, scale, flip=1, ov=null){
-  drawSprite(SP_FREEFORMS, cx, cy-4*scale, scale, flip, ov);
 }
 // Cached radial-glow images: building gradients every frame was the main slowdown.
 const glowCache = new Map();
@@ -240,7 +293,7 @@ function handleSettingsKey(e){ const k=e.key;
   e.preventDefault();
 }
 const CHARS = [
-  {name:"MOONK",   b:"#111827", h:"#050505", s:"#5a3520", p:"#07090d", perk:"OP: all guns, endless ammo, regen", hpBonus:400, speedMul:1.55, ammoBonus:999, ammoMax:999, damageMul:5, fireMul:0.45, resist:0.18, regen:18, ammoInfinite:true, startAllWeapons:true, moonk:true},
+  {name:"MAURICE", b:"#2e86c1", h:"#3a2410", perk:"All-rounder"},
   {name:"BLAZE",   b:"#e74c3c", h:"#16110f", perk:"+15% move speed", speedMul:1.15},
   {name:"VERDE",   b:"#27ae60", h:"#3a2410", perk:"+25 max HP", hpBonus:25},
   {name:"NOVA",    b:"#9b59b6", h:"#efd6b6", perk:"+60 start ammo", ammoBonus:60},
@@ -279,15 +332,8 @@ const BEAT = {
 
 function beginRun(){ const ch=CHARS[charSel]||CHARS[0];
   player.maxHp=100+(ch.hpBonus||0); player.speedMul=ch.speedMul||1; player.ammoBonus=ch.ammoBonus||0;
-  player.ammoMax=ch.ammoMax||AMMO_MAX; player.damageMul=ch.damageMul||1; player.fireMul=ch.fireMul||1;
-  player.resist=ch.resist||1; player.regen=ch.regen||0; player.ammoInfinite=!!ch.ammoInfinite;
-  player.startAllWeapons=!!ch.startAllWeapons; player.moonk=!!ch.moonk;
   night=1; score=0; player.hp=player.maxHp; player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0;
   startNight(1); state="intro"; introTimer=2.6; }
-function unlockAllWeapons(label="FULL ARSENAL"){
-  player.weapons=["pistol","smg","shotgun","plasma"]; player.weapon=3;
-  player.newWeapon={name:label, key:"1-4"};
-}
 function grantFor(n){ const map={2:"smg",3:"shotgun",4:"plasma"}; const id=map[n]; if(!id) return;
   if(!player.weapons.includes(id)){ player.weapons.push(id); player.weapon=player.weapons.length-1;
     player.newWeapon={name:WEAPONS[id].name, key:player.weapons.length}; } }
@@ -295,8 +341,7 @@ function startNight(n){
   night=n; const c=cfg(n); buildMap();
   player.x=22*TS+TS/2; player.y=16*TS+TS/2; player.fireCd=0; player.newWeapon=null; player.lastHit=-10;
   if(n===1){ player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0; gun={x:36*TS+TS/2,y:7*TS+TS/2,t:0}; }
-  else { player.armed=true; gun=null; if(player.startAllWeapons) unlockAllWeapons("MOONK MODE"); else grantFor(n);
-    player.ammo=player.ammoInfinite ? player.ammoMax : Math.min(player.ammoMax, player.ammo+NIGHT_REFILL); }
+  else { player.armed=true; gun=null; grantFor(n); player.ammo=Math.min(AMMO_MAX, player.ammo+NIGHT_REFILL); }
   const p=farPoint();
   boss={ x:p.x,y:p.y,r:20,hp:c.hp,maxHP:c.hp,wobble:Math.random()*6,growlT:1,flip:1,
          atkP:c.packetEvery*0.7, atkS:c.shootEvery, tele:0, enraged:false, hitFlash:0, dead:false };
@@ -309,22 +354,15 @@ function startOrAdvance(){ audioInit();
   else if(state==="over"){ beginRun(); }
   else if(state==="win"){ state="title"; }
 }
-function togglePause(){ if(state==="play") state="pause"; else if(state==="pause") state="play"; }
+function togglePause(){ if(state==="play"){ state="pause"; resetSticks(); } else if(state==="pause") state="play"; }
 
 //============================================================ HELPERS
 function burst(x,y,n,color,spd=4,life=0.5,size=3){ for(let i=0;i<n;i++){ const a=Math.random()*6.28,s=Math.random()*spd;
   parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life,max:life,color,size}); } }
-function hurtPlayer(amount, hitShake){
-  const dmg=Math.max(1, amount*(player.resist||1));
-  player.hp-=dmg; player.lastHit=nightTime; shake=hitShake; sfx.hurt();
-  if(player.moonk) burst(player.x,player.y,10,"#34e7ff",5,0.25,2);
-  if(player.hp<=0){ player.hp=0; gameOver(); return true; }
-  return false;
-}
-function gameOver(){ state="over"; firing=false; sfx.lose(); if(night>best){ best=night; localStorage.setItem("hotdogNights.best",String(best)); } }
-function winGame(){ state="win"; firing=false; sfx.win(); if(5>best){ best=5; localStorage.setItem("hotdogNights.best","5"); }
+function gameOver(){ state="over"; resetSticks(); sfx.lose(); if(night>best){ best=night; localStorage.setItem("hotdogNights.best",String(best)); } }
+function winGame(){ state="win"; resetSticks(); sfx.win(); if(5>best){ best=5; localStorage.setItem("hotdogNights.best","5"); }
   parts=[]; for(let i=0;i<90;i++) parts.push({x:Math.random()*WORLD_W,y:Math.random()*WORLD_H,vx:(Math.random()-0.5)*3,vy:(Math.random()-0.5)*3,life:2.4,max:2.4,color:["#ff3b3b","#34e7ff","#f4d03f","#fff"][i%4],size:4}); }
-function clearNight(){ score+=500; shake=0.6; sfx.kill();
+function clearNight(){ score+=500; shake=0.6; resetSticks(); sfx.kill();
   burst(boss.x,boss.y,60,"#c0392b",7,1.0,5); burst(boss.x,boss.y,30,"#f4d03f",6,0.9,4);
   if(night>=5) winGame();
   else { player.hp=Math.min(player.maxHp, player.hp+25); startNight(night+1); state="intro"; introTimer=2.8; } }
@@ -337,40 +375,36 @@ function fireGlobs(c,enr){ const base=Math.atan2(player.y-boss.y, player.x-boss.
 function update(dt){
   const f=dt*60;
   player.fireCd=Math.max(0,player.fireCd-dt); shake=Math.max(0,shake-dt);
-  const t=Math.min(1, aimLerp*f);                       // aim sensitivity: crosshair eases toward cursor
-  aimPt.x += (mouseX-aimPt.x)*t; aimPt.y += (mouseY-aimPt.y)*t;
-  const mwx=aimPt.x+camX, mwy=aimPt.y+camY;
-  player.aim=Math.atan2(mwy-player.y, mwx-player.x);
+  if(touchAim.active){ player.aim=touchAim.ang;        // touch: right stick aims (and fires)
+    aimPt.x=(player.x-camX)+Math.cos(player.aim)*130; aimPt.y=(player.y-camY)+Math.sin(player.aim)*130; }
+  else if(!isTouch){ const t=Math.min(1, aimLerp*f);    // mouse: crosshair eases toward cursor (sensitivity)
+    aimPt.x += (mouseX-aimPt.x)*t; aimPt.y += (mouseY-aimPt.y)*t;
+    const mwx=aimPt.x+camX, mwy=aimPt.y+camY; player.aim=Math.atan2(mwy-player.y, mwx-player.x); }
   if(Math.cos(player.aim)!==0) player.flip=Math.cos(player.aim)<0?-1:1;
 
   // movement
   let dx=0,dy=0;
-  if(keys["w"]||keys["arrowup"]) dy-=1;
-  if(keys["s"]||keys["arrowdown"]) dy+=1;
-  if(keys["a"]||keys["arrowleft"]) dx-=1;
-  if(keys["d"]||keys["arrowright"]) dx+=1;
+  if(touchMove.active && touchMove.mag>12){ dx=touchMove.vx; dy=touchMove.vy; }   // touch: left stick moves
+  else { if(keys["w"]||keys["arrowup"]) dy-=1; if(keys["s"]||keys["arrowdown"]) dy+=1;
+    if(keys["a"]||keys["arrowleft"]) dx-=1; if(keys["d"]||keys["arrowright"]) dx+=1; }
   if(dx||dy){ const m=Math.hypot(dx,dy), sp=SPEED*player.speedMul*f; moveEntity(player,dx/m*sp,dy/m*sp); }
-  if(player.regen && player.hp<player.maxHp) player.hp=Math.min(player.maxHp, player.hp+player.regen*dt);
 
   // gun pickup
   if(gun){ gun.t+=dt; if(Math.hypot(gun.x-player.x,gun.y-player.y)<28){
-    player.armed=true; gun=null; sfx.pickup();
-    if(player.startAllWeapons){ unlockAllWeapons("MOONK MODE"); player.ammo=player.ammoMax; }
-    else { player.weapons=["pistol"]; player.weapon=0; player.ammo=Math.min(player.ammoMax, START_AMMO+player.ammoBonus); }
-    burst(player.x,player.y,player.moonk?46:24,player.moonk?"#f4d03f":"#34e7ff",7,0.7,3); } }
+    player.armed=true; player.weapons=["pistol"]; player.weapon=0; player.ammo=START_AMMO+player.ammoBonus; gun=null; sfx.pickup();
+    burst(player.x,player.y,24,"#34e7ff",5,0.6,3); } }
 
   // shooting
   const wpn = player.armed ? WEAPONS[player.weapons[player.weapon]] : null;
-  if((firing||keys[" "]) && wpn && player.fireCd<=0){
-    const cost=player.ammoInfinite?0:wpn.cost;
-    if(player.ammo>=cost){ if(!player.ammoInfinite) player.ammo-=cost; player.fireCd=wpn.cd*player.fireMul;
+  const touchShoot = touchAim.active && touchAim.mag>14;
+  if((firing||keys[" "]||touchShoot) && wpn && player.fireCd<=0){
+    if(player.ammo>=wpn.cost){ player.ammo-=wpn.cost; player.fireCd=wpn.cd;
       for(let i=0;i<wpn.pellets;i++){ const a=player.aim+(Math.random()-0.5)*wpn.spread;
-        bullets.push({x:player.x+Math.cos(a)*16,y:player.y+Math.sin(a)*16,vx:Math.cos(a)*wpn.speed,vy:Math.sin(a)*wpn.speed,life:player.moonk?1.05:0.7,dmg:wpn.dmg*player.damageMul,pierce:wpn.pierce+(player.moonk?2:0),color:player.moonk?"#f4d03f":wpn.color}); }
-      burst(player.x+Math.cos(player.aim)*18, player.y+Math.sin(player.aim)*18, player.moonk?9:3, player.moonk?"#34e7ff":"#fff7b0", player.moonk?6:3, 0.1, 2);
+        bullets.push({x:player.x+Math.cos(a)*16,y:player.y+Math.sin(a)*16,vx:Math.cos(a)*wpn.speed,vy:Math.sin(a)*wpn.speed,life:0.7,dmg:wpn.dmg,pierce:wpn.pierce,color:wpn.color}); }
+      burst(player.x+Math.cos(player.aim)*18, player.y+Math.sin(player.aim)*18, 3, "#fff7b0", 3, 0.1, 2);
       sfx[wpn.sound]();
     } else { player.fireCd=0.25; sfx.empty(); }
   }
-  if(player.ammoInfinite) player.ammo=player.ammoMax;
 
   // bullets
   for(const b of bullets){ b.x+=b.vx*f; b.y+=b.vy*f; b.life-=dt;
@@ -395,14 +429,14 @@ function update(dt){
     if(boss.growlT<=0){ const d=Math.hypot(boss.x-player.x,boss.y-player.y);
       const v=Math.max(0.12,0.7*(1-d/460)); sfx.growl(enr?Math.min(1,v+0.2):v); boss.growlT=(enr?1.0:1.7)+Math.random(); }
     const ang=Math.atan2(player.y-boss.y, player.x-boss.x);
-    const sp=c.speed*(enr?1.4:1)*(boss.tele>0?0.3:1)*f, bob=Math.sin(boss.wobble)*0.4*f;
+    const sp=c.speed*(enr?1.3:1)*(boss.tele>0?0.3:1)*f, bob=Math.sin(boss.wobble)*0.4*f;
     boss.flip=Math.cos(ang)<0?-1:1;
     moveEntity(boss, Math.cos(ang)*sp, Math.sin(ang)*sp+bob);
     if(Math.hypot(boss.x-player.x,boss.y-player.y)<boss.r+player.r){
-      if(nightTime-player.lastHit>0.8){ if(hurtPlayer(c.contact,0.4)) return;
+      if(nightTime-player.lastHit>0.8){ player.hp-=c.contact; player.lastHit=nightTime; shake=0.4; sfx.hurt();
         burst(player.x,player.y,10,"#ff2d2d",4,0.4,3);
         const ka=Math.atan2(player.y-boss.y,player.x-boss.x); moveEntity(player,Math.cos(ka)*24,Math.sin(ka)*24);
-      } }
+        if(player.hp<=0){ player.hp=0; gameOver(); return; } } }
     if(c.packets){ boss.atkP-=dt; if(boss.atkP<=0){ const n=c.packetBurst+(enr?1:0);
       for(let i=0;i<n && packets.length<10;i++){ const a=Math.random()*6.28, d=24+Math.random()*16;
         packets.push({x:boss.x+Math.cos(a)*d,y:boss.y+Math.sin(a)*d,r:9,dead:false,wob:Math.random()*6}); }
@@ -414,22 +448,22 @@ function update(dt){
   // ketchup globs
   for(const g of globs){ g.x+=g.vx*f; g.y+=g.vy*f; g.life-=dt;
     if(collides(g.x,g.y,3)){ g.life=0; burst(g.x,g.y,8,"#b01818",3,0.4,3); continue; }
-    if(Math.hypot(g.x-player.x,g.y-player.y)<player.r+g.r){ g.life=0; if(hurtPlayer(g.dmg,0.3)) return;
-      burst(player.x,player.y,12,"#c0392b",4,0.5,3); } }
+    if(Math.hypot(g.x-player.x,g.y-player.y)<player.r+g.r){ g.life=0; player.hp-=g.dmg; player.lastHit=nightTime; shake=0.3; sfx.hurt();
+      burst(player.x,player.y,12,"#c0392b",4,0.5,3); if(player.hp<=0){ player.hp=0; gameOver(); return; } } }
   globs=globs.filter(g=>g.life>0);
 
   // packet minions
   for(const pk of packets){ if(pk.dead) continue; pk.wob+=dt*10;
     const a=Math.atan2(player.y-pk.y,player.x-pk.x), sp=1.25*(boss&&boss.enraged?1.3:1)*f;
     moveEntity(pk, Math.cos(a)*sp, Math.sin(a)*sp);
-    if(Math.hypot(pk.x-player.x,pk.y-player.y)<player.r+pk.r){ pk.dead=true; sfx.pop(); if(hurtPlayer(8,0.2)) return;
-      burst(player.x,player.y,8,"#c0392b",3,0.4,2); } }
+    if(Math.hypot(pk.x-player.x,pk.y-player.y)<player.r+pk.r){ pk.dead=true; player.hp-=8; player.lastHit=nightTime; shake=0.2; sfx.pop();
+      burst(player.x,player.y,8,"#c0392b",3,0.4,2); if(player.hp<=0){ player.hp=0; gameOver(); return; } } }
   packets=packets.filter(p=>!p.dead);
 
   // ammo crates
   if(player.armed){ crateTimer-=dt; if(crateTimer<=0 && crates.length<2){ const p=freeWorldPoint(); crates.push({x:p.x,y:p.y}); crateTimer=10; }
     for(let i=crates.length-1;i>=0;i--){ const cr=crates[i];
-      if(Math.hypot(cr.x-player.x,cr.y-player.y)<26){ player.ammo=Math.min(player.ammoMax,player.ammo+CRATE_AMMO); crates.splice(i,1); sfx.ammo(); burst(player.x,player.y,12,"#f4d03f",4,0.4,3); } } }
+      if(Math.hypot(cr.x-player.x,cr.y-player.y)<26){ player.ammo=Math.min(AMMO_MAX,player.ammo+CRATE_AMMO); crates.splice(i,1); sfx.ammo(); burst(player.x,player.y,12,"#f4d03f",4,0.4,3); } } }
 
   // particles + clock
   for(const p of parts){ p.x+=p.vx*f; p.y+=p.vy*f; p.vx*=0.92; p.vy*=0.92; p.life-=dt; }
@@ -479,13 +513,7 @@ function render(){
     if(boss.hitFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,boss.hitFlash*6); ctx.fillStyle="#fff"; ctx.fillRect(bx-22,by-36,44,72); ctx.restore(); } }
 
   // player
-  if(player.moonk){ const px=player.x-camX, py=player.y-camY;
-    ctx.save(); ctx.globalCompositeOperation="lighter";
-    glow(px, py, 58, "rgba(52,231,255,0.34)"); glow(px, py, 34, "rgba(244,208,63,0.28)");
-    ctx.strokeStyle="rgba(244,208,63,0.72)"; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(px,py,24+Math.sin(performance.now()/90)*3,0,7); ctx.stroke(); ctx.restore(); }
   drawSprite(SP_PLAYER, player.x-camX, player.y-camY, 3, player.flip, CHARS[charSel]);
-  if(player.moonk) drawMoonkFreeforms(player.x-camX, player.y-camY, 3, player.flip, CHARS[charSel]);
   if(player.armed){ const a=player.aim, bx=player.x-camX, by=player.y-camY;
     ctx.strokeStyle="#9a9aae"; ctx.lineWidth=4; ctx.lineCap="round";
     ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+Math.cos(a)*20,by+Math.sin(a)*20); ctx.stroke();
@@ -517,6 +545,7 @@ function render(){
   if(state==="play"||state==="pause") drawReticle();
   cv.style.cursor = (state==="play"||state==="pause") ? "none" : "default";
   drawHUD();
+  if(isTouch && state==="play") drawTouchSticks();
   if(state==="title") drawTitle();
   if(state==="name") drawName();
   if(state==="charselect") drawCharSelect();
@@ -547,10 +576,10 @@ function drawReticle(){ const x=aimPt.x,y=aimPt.y; ctx.save(); ctx.globalComposi
 function wrap(text,max){ const words=text.split(" "); let line="",out=[]; for(const w of words){ const t=line?line+" "+w:w;
   if(ctx.measureText(t).width>max && line){ out.push(line); line=w; } else line=t; } if(line) out.push(line); return out; }
 function drawHUD(){
+  hudButtons.length=0;
   ctx.textAlign="left"; ctx.fillStyle="rgba(5,5,15,0.7)"; ctx.fillRect(0,0,W,40);
   ctx.fillStyle="#ff3b3b"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText("NIGHT "+night, 16, 27);
-  if(playerName){ ctx.fillStyle=player.moonk?"#f4d03f":"#7a7a9a"; ctx.font="12px Trebuchet MS"; ctx.fillText(playerName.toUpperCase(), 110, 26); }
-  if(player.moonk){ ctx.fillStyle="#34e7ff"; ctx.font="bold 12px Trebuchet MS"; ctx.fillText("MOONK MODE", 110, 38); }
+  if(playerName){ ctx.fillStyle="#7a7a9a"; ctx.font="12px Trebuchet MS"; ctx.fillText(playerName.toUpperCase(), 110, 26); }
   const prog=Math.min(1,nightTime/NIGHT_LEN), hr=Math.floor(prog*6), label=(hr<=0?12:hr)+" AM";
   ctx.fillStyle="#e8e8f0"; ctx.font="bold 16px Trebuchet MS"; ctx.textAlign="center"; ctx.fillText(label, W/2, 17);
   ctx.fillStyle="#1a1a2e"; ctx.fillRect(W/2-90,22,180,4); ctx.fillStyle="#9a7bff"; ctx.fillRect(W/2-90,22,180*prog,4);
@@ -574,29 +603,35 @@ function drawHUD(){
   if(player.armed){ let wx=300; ctx.textAlign="left";
     player.weapons.forEach((id,i)=>{ const on=i===player.weapon;
       ctx.fillStyle=on?"#34e7ff":"#222a3a"; ctx.fillRect(wx,H-36,74,22);
-      ctx.fillStyle=on?"#04121a":"#90a0b8"; ctx.font="bold 11px Trebuchet MS"; ctx.fillText((i+1)+" "+WEAPONS[id].name, wx+5, H-21); wx+=80; });
-    ctx.fillStyle=player.ammo>0?"#34e7ff":"#ff3b3b"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText(player.ammoInfinite?"AMMO UNLIMITED":"AMMO "+player.ammo, wx+6, H-19);
+      ctx.fillStyle=on?"#04121a":"#90a0b8"; ctx.font="bold 11px Trebuchet MS"; ctx.fillText((i+1)+" "+WEAPONS[id].name, wx+5, H-21);
+      if(isTouch) pushBtn(hudButtons, wx, H-38, 74, 26, "", ()=>player.weapon=i);
+      wx+=80; });
+    ctx.fillStyle=player.ammo>0?"#34e7ff":"#ff3b3b"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText("AMMO "+player.ammo, wx+6, H-19);
   } else { ctx.fillStyle="#ffb74d"; ctx.font="bold 15px Trebuchet MS"; ctx.fillText("> Reach the LASER TAG ARENA and grab the gun!", 300, H-21); }
+  if(isTouch && state==="play"){ pushBtn(hudButtons, W-52, 44, 42, 32, "II", togglePause); drawBtn(hudButtons[hudButtons.length-1]); }
 }
 function dim(){ ctx.fillStyle="rgba(5,5,12,0.82)"; ctx.fillRect(0,0,W,H); }
 function drawCenter(title,sub,color){ dim(); ctx.textAlign="center";
   ctx.fillStyle=color; ctx.font="bold 56px Trebuchet MS"; ctx.fillText(title,W/2,H/2-10);
   ctx.fillStyle="#cfcfe0"; ctx.font="20px Trebuchet MS"; ctx.fillText(sub,W/2,H/2+34); }
-function drawTitle(){ dim(); ctx.textAlign="center";
+function drawTitle(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
   ctx.fillStyle="#ff3b3b"; ctx.font="bold 60px Trebuchet MS"; ctx.fillText("HOTDOG NIGHTS", W/2, H/2-78);
   ctx.fillStyle="#34e7ff"; ctx.font="bold 24px Trebuchet MS"; ctx.fillText(">>  XTREME ACTION PARK  <<", W/2, H/2-42);
   ctx.fillStyle="#cfcfe0"; ctx.font="16px Trebuchet MS"; ctx.fillText("The mascot wakes at midnight. Five nights. One hotdog. Survive.", W/2, H/2+2);
-  ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  ENTER to play       S for settings", W/2, H/2+62);
-  ctx.fillStyle="#5a5a7a"; ctx.font="13px Trebuchet MS"; ctx.fillText("WASD move | mouse aim | click/space shoot | 1-4 swap weapon | P pause | M mute", W/2, H/2+100);
-  if(best>0){ ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Best night reached: "+best, W/2, H/2+126); } }
-function drawName(){ dim(); ctx.textAlign="center";
+  if(isTouch){ pushBtn(uiButtons, W/2-90, H/2+38, 180, 44, "PLAY", ()=>startOrAdvance());
+    pushBtn(uiButtons, W/2-90, H/2+94, 180, 40, "SETTINGS", ()=>openSettings("title")); uiButtons.forEach(drawBtn); }
+  else { ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  ENTER to play       S for settings", W/2, H/2+62);
+    ctx.fillStyle="#5a5a7a"; ctx.font="13px Trebuchet MS"; ctx.fillText("WASD move | mouse aim | click/space shoot | 1-4 swap weapon | P pause | M mute", W/2, H/2+100); }
+  if(best>0){ ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Best night reached: "+best, W/2, H/2+150); } }
+function drawName(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
   ctx.fillStyle="#34e7ff"; ctx.font="bold 32px Trebuchet MS"; ctx.fillText("WHO'S WORKING TONIGHT?", W/2, H/2-58);
-  ctx.fillStyle="#cfcfe0"; ctx.font="15px Trebuchet MS"; ctx.fillText("Type your name, then press ENTER", W/2, H/2-26);
+  ctx.fillStyle="#cfcfe0"; ctx.font="15px Trebuchet MS"; ctx.fillText(isTouch?"Tap the box, type, then START":"Type your name, then press ENTER", W/2, H/2-26);
   ctx.fillStyle="#101018"; ctx.fillRect(W/2-160,H/2-4,320,46);
   ctx.strokeStyle="#34e7ff"; ctx.lineWidth=2; ctx.strokeRect(W/2-160,H/2-4,320,46);
   const caret=(Math.floor(performance.now()/500)%2)?"|":"";
   ctx.fillStyle="#fff"; ctx.font="bold 26px Trebuchet MS"; ctx.fillText(playerName+caret, W/2, H/2+28);
-  ctx.fillStyle="#5a5a7a"; ctx.font="12px Trebuchet MS"; ctx.fillText("letters & numbers, up to 14 characters", W/2, H/2+70); }
+  if(isTouch){ pushBtn(uiButtons, W/2-70, H/2+72, 140, 42, "START", confirmName); drawBtn(uiButtons[0]); }
+  else { ctx.fillStyle="#5a5a7a"; ctx.font="12px Trebuchet MS"; ctx.fillText("letters & numbers, up to 14 characters", W/2, H/2+70); } }
 function drawStory(){ dim(); ctx.textAlign="center"; const s=STORY[Math.min(storyPage,STORY.length-1)];
   ctx.fillStyle="#ff6b3b"; ctx.font="bold 34px Trebuchet MS"; ctx.fillText(s[0], W/2, H/2-70);
   ctx.fillStyle="#e8e8f0"; ctx.font="19px Trebuchet MS"; wrap(s[1],620).forEach((ln,i)=>ctx.fillText(ln, W/2, H/2-26+i*28));
@@ -619,34 +654,43 @@ function drawWin(){ dim(); ctx.textAlign="center";
   wrap("Frankie collapses into a steaming pile of relish and regret. The park is yours again - and you'll smell like mustard for the rest of your life.",640).forEach((ln,i)=>ctx.fillText(ln,W/2,H/2-6+i*26));
   ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText((playerName?playerName.toUpperCase()+" SURVIVED ALL 5 NIGHTS":"YOU SURVIVED ALL 5 NIGHTS")+"  -  Score: "+score, W/2, H/2+70);
   ctx.fillStyle="#5a5a7a"; ctx.font="14px Trebuchet MS"; ctx.fillText("CLICK or press ENTER for the title", W/2, H/2+104); }
-function drawPause(){ drawCenter("PAUSED","Press P to resume","#34e7ff");
-  ctx.textAlign="center"; ctx.fillStyle="#7a7a9a"; ctx.font="14px Trebuchet MS";
-  ctx.fillText("O: Options      M: "+(muted?"Unmute":"Mute"), W/2, H/2+74); }
-function drawSettings(){ dim(); ctx.textAlign="center";
-  ctx.fillStyle="#34e7ff"; ctx.font="bold 40px Trebuchet MS"; ctx.fillText("SETTINGS", W/2, 110);
-  SETTINGS.forEach((s,i)=>{ const y=178+i*48, on=i===settingsSel;
+function drawPause(){ drawCenter("PAUSED", isTouch?"":"Press P to resume","#34e7ff"); uiButtons.length=0;
+  if(isTouch){ pushBtn(uiButtons, W/2-160,H/2+48,150,44,"RESUME",()=>togglePause());
+    pushBtn(uiButtons, W/2+10,H/2+48,150,44,"OPTIONS",()=>openSettings("pause"));
+    pushBtn(uiButtons, W/2-75,H/2+106,150,40, muted?"UNMUTE":"MUTE", ()=>muted=!muted);
+    uiButtons.forEach(drawBtn); }
+  else { ctx.textAlign="center"; ctx.fillStyle="#7a7a9a"; ctx.font="14px Trebuchet MS"; ctx.fillText("O: Options      M: "+(muted?"Unmute":"Mute"), W/2, H/2+74); } }
+function drawSettings(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
+  ctx.fillStyle="#34e7ff"; ctx.font="bold 40px Trebuchet MS"; ctx.fillText("SETTINGS", W/2, 96);
+  SETTINGS.forEach((s,i)=>{ const y=150+i*52, on=i===settingsSel;
     ctx.textAlign="left"; ctx.font="18px Trebuchet MS"; ctx.fillStyle=on?"#f4d03f":"#cfcfe0";
-    ctx.fillText((on?"> ":"   ")+s.label, W/2-230, y);
+    ctx.fillText((on?"> ":"   ")+s.label, W/2-250, y);
     const frac=(opt[s.k]-s.min)/(s.max-s.min);
-    ctx.fillStyle="#1a1a2e"; ctx.fillRect(W/2+30,y-14,170,16);
-    ctx.fillStyle=on?"#34e7ff":"#3a6a78"; ctx.fillRect(W/2+30,y-14,170*frac,16);
-    ctx.textAlign="left"; ctx.fillStyle="#fff"; ctx.font="bold 15px Trebuchet MS"; ctx.fillText(s.fmt(opt[s.k]), W/2+210, y-1); });
-  ctx.textAlign="center"; ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS";
-  ctx.fillText("Up/Down select    Left/Right adjust    ENTER or ESC to go back", W/2, H-46); }
-function drawCharSelect(){ dim(); ctx.textAlign="center";
-  ctx.fillStyle="#34e7ff"; ctx.font="bold 36px Trebuchet MS"; ctx.fillText("CHOOSE YOUR CHARACTER", W/2, 110);
+    ctx.fillStyle="#1a1a2e"; ctx.fillRect(W/2+30,y-14,150,16);
+    ctx.fillStyle=on?"#34e7ff":"#3a6a78"; ctx.fillRect(W/2+30,y-14,150*frac,16);
+    ctx.textAlign="left"; ctx.fillStyle="#fff"; ctx.font="bold 15px Trebuchet MS"; ctx.fillText(s.fmt(opt[s.k]), W/2+245, y-1);
+    if(isTouch){ const setv=d=>{ settingsSel=i; opt[s.k]=Math.max(s.min,Math.min(s.max,opt[s.k]+d*s.step)); applySettings(); };
+      pushBtn(uiButtons, W/2-22, y-19, 36, 30, "-", ()=>setv(-1)); drawBtn(uiButtons[uiButtons.length-1]);
+      pushBtn(uiButtons, W/2+188, y-19, 36, 30, "+", ()=>setv(1)); drawBtn(uiButtons[uiButtons.length-1]); } });
+  if(isTouch){ pushBtn(uiButtons, W/2-70, H-66, 140, 40, "SAVE & BACK", ()=>{ saveSettings(); state=settingsFrom; }); drawBtn(uiButtons[uiButtons.length-1]); }
+  else { ctx.textAlign="center"; ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Up/Down select    Left/Right adjust    ENTER or ESC to go back", W/2, H-40); } }
+function drawCharSelect(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
+  ctx.fillStyle="#34e7ff"; ctx.font="bold 36px Trebuchet MS"; ctx.fillText("CHOOSE YOUR CHARACTER", W/2, 92);
   const gap=W/(CHARS.length+1);
-  CHARS.forEach((c,i)=>{ const x=gap*(i+1), y=H/2-10, on=i===charSel;
+  CHARS.forEach((c,i)=>{ const x=gap*(i+1), y=H/2-20, on=i===charSel;
     if(on){ ctx.fillStyle="rgba(52,231,255,0.12)"; ctx.fillRect(x-58,y-92,116,176); ctx.strokeStyle="#34e7ff"; ctx.lineWidth=2; ctx.strokeRect(x-58,y-92,116,176); }
-    drawSprite(SP_PLAYER, x, y-34, 5, 1, c);
-    if(c.moonk) drawMoonkFreeforms(x, y-34, 5, 1, c);
-    ctx.fillStyle=on?"#f4d03f":"#cfcfe0"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText(c.name, x, y+44);
-    ctx.fillStyle=on?"#9fefff":"#7a7a9a"; ctx.font="12px Trebuchet MS"; wrap(c.perk,108).forEach((ln,j)=>ctx.fillText(ln,x,y+64+j*15)); });
-  ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Left/Right to choose    ENTER to confirm    ESC to go back", W/2, H-46); }
+    drawSprite(SP_PLAYER, x, y-44, 5, 1, c);
+    ctx.textAlign="center"; ctx.fillStyle=on?"#f4d03f":"#cfcfe0"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText(c.name, x, y+34);
+    ctx.fillStyle=on?"#9fefff":"#7a7a9a"; ctx.font="12px Trebuchet MS"; wrap(c.perk,108).forEach((ln,j)=>ctx.fillText(ln,x,y+54+j*15));
+    if(isTouch) pushBtn(uiButtons, x-58, y-92, 116, 176, "", ()=>charSel=i); });
+  if(isTouch){ pushBtn(uiButtons, W/2-150, H-66, 140, 42, "CONFIRM", ()=>{ localStorage.setItem("hotdogNights.char",String(charSel)); state="story"; storyPage=0; }); drawBtn(uiButtons[uiButtons.length-1]);
+    pushBtn(uiButtons, W/2+10, H-66, 140, 42, "BACK", ()=>{ state="name"; }); drawBtn(uiButtons[uiButtons.length-1]); }
+  else { ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Left/Right to choose    ENTER to confirm    ESC to go back", W/2, H-40); } }
 
 //============================================================ LOOP
 let last=performance.now();
 function frame(now){ let dt=(now-last)/1000; last=now; dt=Math.min(dt,0.05);
+  syncNameInput();
   if(state==="play") update(dt);
   if(state==="intro"){ introTimer-=dt; if(introTimer<=0) state="play"; }
   if(state==="win"){ for(const p of parts){ p.x+=p.vx; p.y+=p.vy; p.life-=dt; } parts=parts.filter(p=>p.life>0); }
