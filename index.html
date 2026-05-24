@@ -37,6 +37,7 @@ const lctx = lcv.getContext("2d");
 const keys = {};
 let mouseX = W/2, mouseY = H/2, firing = false;
 addEventListener("keydown", e => {
+  if (state === "name"){ handleNameKey(e); return; }
   const k = e.key.toLowerCase(); keys[k] = true;
   if ([" ","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) e.preventDefault();
   if (k === "enter") startOrAdvance();
@@ -44,6 +45,11 @@ addEventListener("keydown", e => {
   if (k === "m") muted = !muted;
   if (/^[1-9]$/.test(k) && player.weapons){ const i = +k-1; if (i < player.weapons.length) player.weapon = i; }
 });
+function handleNameKey(e){
+  if (e.key === "Enter"){ if (playerName.trim()){ playerName = playerName.trim(); localStorage.setItem("hotdogNights.name", playerName); state="story"; storyPage=0; } e.preventDefault(); return; }
+  if (e.key === "Backspace"){ playerName = playerName.slice(0,-1); e.preventDefault(); return; }
+  if (e.key.length === 1 && /[A-Za-z0-9 _!\-]/.test(e.key) && playerName.length < 14){ playerName += e.key; e.preventDefault(); }
+}
 addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 function canvasPos(e){ const r = cv.getBoundingClientRect();
   return { x:(e.clientX-r.left)*(W/r.width), y:(e.clientY-r.top)*(H/r.height) }; }
@@ -132,6 +138,18 @@ function drawSprite(grid, cx, cy, scale, flip=1){
       const dx = flip<0 ? ox+(gw-1-col)*scale : ox+col*scale;
       ctx.fillRect(Math.round(dx), Math.round(oy+row*scale), scale, scale); } }
 }
+// Cached radial-glow images: building gradients every frame was the main slowdown.
+const glowCache = new Map();
+function glow(x, y, radius, color){
+  const key = color + "|" + radius;
+  let c = glowCache.get(key);
+  if (!c){ c = document.createElement("canvas"); c.width = c.height = radius*2;
+    const g = c.getContext("2d");
+    const rg = g.createRadialGradient(radius,radius,0,radius,radius,radius);
+    rg.addColorStop(0,color); rg.addColorStop(1,"rgba(0,0,0,0)");
+    g.fillStyle = rg; g.fillRect(0,0,radius*2,radius*2); glowCache.set(key,c); }
+  ctx.drawImage(c, x-radius, y-radius);
+}
 
 //============================================================ WEAPONS
 const WEAPONS = {
@@ -174,6 +192,7 @@ function farPoint(){ let p; for(let i=0;i<60;i++){ p=freeWorldPoint(); if(Math.h
 //============================================================ STATE
 let state="title", night=1, score=0, storyPage=0;
 let best=parseInt(localStorage.getItem("hotdogNights.best")||"0",10);
+let playerName=localStorage.getItem("hotdogNights.name")||"";
 const player={ x:0,y:0,r:11,hp:100,armed:false,aim:-Math.PI/2,lastHit:-10,fireCd:0,ammo:0,flip:1,
   weapons:[],weapon:0,newWeapon:null };
 let boss=null, bullets=[], globs=[], packets=[], parts=[], crates=[], gun=null;
@@ -209,7 +228,7 @@ function grantFor(n){ const map={2:"smg",3:"shotgun",4:"plasma"}; const id=map[n
     player.newWeapon={name:WEAPONS[id].name, key:player.weapons.length}; } }
 function startNight(n){
   night=n; const c=cfg(n); buildMap();
-  player.x=22*TS+TS/2; player.y=16*TS+TS/2; player.fireCd=0; player.newWeapon=null;
+  player.x=22*TS+TS/2; player.y=16*TS+TS/2; player.fireCd=0; player.newWeapon=null; player.lastHit=-10;
   if(n===1){ player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0; gun={x:36*TS+TS/2,y:7*TS+TS/2,t:0}; }
   else { player.armed=true; gun=null; grantFor(n); player.ammo=Math.min(99, player.ammo+30); }
   const p=farPoint();
@@ -218,7 +237,7 @@ function startNight(n){
   bullets=[]; globs=[]; packets=[]; parts=[]; crates=[]; crateTimer=6; nightTime=0; shake=0;
 }
 function startOrAdvance(){ audioInit();
-  if(state==="title"){ state="story"; storyPage=0; }
+  if(state==="title"){ state="name"; }
   else if(state==="story"){ storyPage++; if(storyPage>=STORY.length) beginRun(); }
   else if(state==="intro"){ introTimer=0; }
   else if(state==="over"){ beginRun(); }
@@ -354,10 +373,8 @@ function render(){
       ctx.fillStyle="#5c5c82"; ctx.fillRect(sx,sy,6,TS);
       ctx.fillStyle="#23233a"; ctx.fillRect(sx,sy+TS-6,TS,6);
       ctx.fillStyle="#1a1a28"; ctx.fillRect(sx+TS-4,sy,4,TS);
-      ctx.strokeStyle="#15151f"; ctx.lineWidth=1; ctx.strokeRect(sx+0.5,sy+0.5,TS-1,TS-1);
     } else { ctx.fillStyle=zoneColorAt(tx,ty); ctx.fillRect(sx,sy,TS,TS);
-      ctx.fillStyle="rgba(0,0,0,0.18)"; ctx.fillRect(sx+2,sy+2,TS-4,TS-4);
-      ctx.strokeStyle="rgba(255,255,255,0.05)"; ctx.lineWidth=1; ctx.strokeRect(sx+0.5,sy+0.5,TS-1,TS-1); }
+      ctx.fillStyle="rgba(0,0,0,0.18)"; ctx.fillRect(sx+2,sy+2,TS-4,TS-4); }
   }
   ctx.font="bold 13px Trebuchet MS"; ctx.textAlign="center";
   for(const z of ZONES){ const lx=(z.x+z.w/2)*TS-camX, ly=z.y*TS-camY+16;
@@ -401,28 +418,21 @@ function render(){
     ctx.fillStyle="rgba(86,96,150,0.16)"; ctx.fillRect(sx,sy,TS,TS);
     if(!tileSolid(tx,ty-1)){ ctx.fillStyle="rgba(150,180,255,0.42)"; ctx.fillRect(sx,sy,TS,2); } }
   if(boss && !boss.dead){ const bx=boss.x-camX, by=boss.y-camY, ey=by-BS*4;
-    const r=boss.tele>0?66:54, col=boss.tele>0?"255,150,40":(boss.enraged?"255,40,40":"180,30,30");
-    let rg=ctx.createRadialGradient(bx,by-10,2,bx,by-10,r); rg.addColorStop(0,"rgba("+col+",0.5)"); rg.addColorStop(1,"rgba("+col+",0)");
-    ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(bx,by-10,r,0,7); ctx.fill();
-    let eg=ctx.createRadialGradient(bx,ey,0,bx,ey,26); eg.addColorStop(0,"rgba(255,40,40,0.6)"); eg.addColorStop(1,"rgba(255,40,40,0)");
-    ctx.fillStyle=eg; ctx.beginPath(); ctx.arc(bx,ey,26,0,7); ctx.fill();
+    const r=boss.tele>0?66:54, col=boss.tele>0?"rgba(255,150,40,0.5)":(boss.enraged?"rgba(255,50,50,0.5)":"rgba(180,30,30,0.5)");
+    glow(bx,by-10,r,col); glow(bx,ey,26,"rgba(255,40,40,0.6)");
     ctx.fillStyle="#ff2a2a"; ctx.fillRect(bx-13,ey-2,6,6); ctx.fillRect(bx+7,ey-2,6,6); }
-  for(const g of globs){ const x=g.x-camX,y=g.y-camY; let rg=ctx.createRadialGradient(x,y,0,x,y,g.r+9);
-    rg.addColorStop(0,"rgba(255,40,40,0.7)"); rg.addColorStop(1,"rgba(255,40,40,0)"); ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(x,y,g.r+9,0,7); ctx.fill(); }
-  for(const pk of packets){ if(pk.dead) continue; const x=pk.x-camX,y=pk.y-camY; let rg=ctx.createRadialGradient(x,y,0,x,y,16);
-    rg.addColorStop(0,"rgba(210,50,50,0.4)"); rg.addColorStop(1,"rgba(210,50,50,0)"); ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(x,y,16,0,7); ctx.fill(); }
-  if(gun){ const gx=gun.x-camX,gy=gun.y-camY; let rg=ctx.createRadialGradient(gx,gy,2,gx,gy,60);
-    rg.addColorStop(0,"rgba(52,231,255,0.6)"); rg.addColorStop(1,"rgba(52,231,255,0)"); ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(gx,gy,60,0,7); ctx.fill(); }
-  for(const cr of crates){ const cx=cr.x-camX,cy=cr.y-camY; let rg=ctx.createRadialGradient(cx,cy,1,cx,cy,30);
-    rg.addColorStop(0,"rgba(244,208,63,0.5)"); rg.addColorStop(1,"rgba(244,208,63,0)"); ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(cx,cy,30,0,7); ctx.fill(); }
-  for(const b of bullets){ const bx=b.x-camX,by=b.y-camY; ctx.fillStyle="#fff"; ctx.fillRect(bx-2,by-2,4,4);
-    let rg=ctx.createRadialGradient(bx,by,0,bx,by,10); rg.addColorStop(0,b.color); rg.addColorStop(1,"rgba(0,0,0,0)"); ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(bx,by,10,0,7); ctx.fill(); }
+  for(const g of globs) glow(g.x-camX, g.y-camY, 18, "rgba(255,40,40,0.7)");
+  for(const pk of packets){ if(!pk.dead) glow(pk.x-camX, pk.y-camY, 16, "rgba(210,50,50,0.4)"); }
+  if(gun) glow(gun.x-camX, gun.y-camY, 60, "rgba(52,231,255,0.55)");
+  for(const cr of crates) glow(cr.x-camX, cr.y-camY, 30, "rgba(244,208,63,0.5)");
+  for(const b of bullets){ const bx=b.x-camX,by=b.y-camY; ctx.fillStyle="#fff"; ctx.fillRect(bx-2,by-2,4,4); glow(bx,by,10,b.color); }
   ctx.restore();
 
   if(state==="play"||state==="pause") drawReticle();
   cv.style.cursor = (state==="play"||state==="pause") ? "none" : "default";
   drawHUD();
   if(state==="title") drawTitle();
+  if(state==="name") drawName();
   if(state==="story") drawStory();
   if(state==="intro") drawIntro();
   if(state==="pause") drawCenter("PAUSED","Press P to resume","#34e7ff");
@@ -450,6 +460,7 @@ function wrap(text,max){ const words=text.split(" "); let line="",out=[]; for(co
 function drawHUD(){
   ctx.textAlign="left"; ctx.fillStyle="rgba(5,5,15,0.7)"; ctx.fillRect(0,0,W,40);
   ctx.fillStyle="#ff3b3b"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText("NIGHT "+night, 16, 27);
+  if(playerName){ ctx.fillStyle="#7a7a9a"; ctx.font="12px Trebuchet MS"; ctx.fillText(playerName.toUpperCase(), 110, 26); }
   const prog=Math.min(1,nightTime/NIGHT_LEN), hr=Math.min(5,Math.floor(prog*6)), label=(hr===0?12:hr)+" AM";
   ctx.fillStyle="#e8e8f0"; ctx.font="bold 16px Trebuchet MS"; ctx.textAlign="center"; ctx.fillText(label, W/2, 17);
   ctx.fillStyle="#1a1a2e"; ctx.fillRect(W/2-90,22,180,4); ctx.fillStyle="#9a7bff"; ctx.fillRect(W/2-90,22,180*prog,4);
@@ -486,6 +497,14 @@ function drawTitle(){ dim(); ctx.textAlign="center";
   ctx.fillStyle="#cfcfe0"; ctx.font="16px Trebuchet MS"; ctx.fillText("The mascot wakes at midnight. Five nights. One hotdog. Survive.", W/2, H/2+2);
   ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  CLICK or press ENTER", W/2, H/2+62);
   ctx.fillStyle="#5a5a7a"; ctx.font="13px Trebuchet MS"; ctx.fillText("WASD move | mouse aim | click/space shoot | 1-4 swap weapon | P pause | M mute", W/2, H/2+100); }
+function drawName(){ dim(); ctx.textAlign="center";
+  ctx.fillStyle="#34e7ff"; ctx.font="bold 32px Trebuchet MS"; ctx.fillText("WHO'S WORKING TONIGHT?", W/2, H/2-58);
+  ctx.fillStyle="#cfcfe0"; ctx.font="15px Trebuchet MS"; ctx.fillText("Type your name, then press ENTER", W/2, H/2-26);
+  ctx.fillStyle="#101018"; ctx.fillRect(W/2-160,H/2-4,320,46);
+  ctx.strokeStyle="#34e7ff"; ctx.lineWidth=2; ctx.strokeRect(W/2-160,H/2-4,320,46);
+  const caret=(Math.floor(performance.now()/500)%2)?"|":"";
+  ctx.fillStyle="#fff"; ctx.font="bold 26px Trebuchet MS"; ctx.fillText(playerName+caret, W/2, H/2+28);
+  ctx.fillStyle="#5a5a7a"; ctx.font="12px Trebuchet MS"; ctx.fillText("letters & numbers, up to 14 characters", W/2, H/2+70); }
 function drawStory(){ dim(); ctx.textAlign="center"; const s=STORY[Math.min(storyPage,STORY.length-1)];
   ctx.fillStyle="#ff6b3b"; ctx.font="bold 34px Trebuchet MS"; ctx.fillText(s[0], W/2, H/2-70);
   ctx.fillStyle="#e8e8f0"; ctx.font="19px Trebuchet MS"; wrap(s[1],620).forEach((ln,i)=>ctx.fillText(ln, W/2, H/2-26+i*28));
@@ -498,7 +517,7 @@ function drawIntro(){ dim(); ctx.textAlign="center";
   ctx.fillStyle="#5a5a7a"; ctx.font="13px Trebuchet MS"; ctx.fillText("ENTER to begin", W/2, H/2+104); }
 function drawOver(){ dim(); ctx.textAlign="center";
   ctx.fillStyle="#ff3b3b"; ctx.font="bold 54px Trebuchet MS"; ctx.fillText("YOU GOT KETCHUP'D", W/2, H/2-28);
-  ctx.fillStyle="#e8e8f0"; ctx.font="22px Trebuchet MS"; ctx.fillText("Frankie got you on Night "+night, W/2, H/2+12);
+  ctx.fillStyle="#e8e8f0"; ctx.font="22px Trebuchet MS"; ctx.fillText((playerName?playerName+", ":"")+"Frankie got you on Night "+night, W/2, H/2+12);
   ctx.fillStyle="#f4d03f"; ctx.font="20px Trebuchet MS"; ctx.fillText("Score: "+score, W/2, H/2+44);
   ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  CLICK or press ENTER to retry", W/2, H/2+98); }
 function drawWin(){ dim(); ctx.textAlign="center";
@@ -506,7 +525,7 @@ function drawWin(){ dim(); ctx.textAlign="center";
   ctx.fillStyle="#3ddc84"; ctx.font="bold 46px Trebuchet MS"; ctx.fillText("6 AM. FRANKIE FALLS.", W/2, H/2-44);
   ctx.fillStyle="#e8e8f0"; ctx.font="18px Trebuchet MS";
   wrap("Frankie collapses into a steaming pile of relish and regret. The park is yours again - and you'll smell like mustard for the rest of your life.",640).forEach((ln,i)=>ctx.fillText(ln,W/2,H/2-6+i*26));
-  ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText("YOU SURVIVED ALL 5 NIGHTS  -  Score: "+score, W/2, H/2+70);
+  ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText((playerName?playerName.toUpperCase()+" SURVIVED ALL 5 NIGHTS":"YOU SURVIVED ALL 5 NIGHTS")+"  -  Score: "+score, W/2, H/2+70);
   ctx.fillStyle="#5a5a7a"; ctx.font="14px Trebuchet MS"; ctx.fillText("CLICK or press ENTER for the title", W/2, H/2+104); }
 
 //============================================================ LOOP
