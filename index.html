@@ -18,7 +18,7 @@
 </head>
 <body>
 <div id="wrap"><canvas id="game" width="960" height="600"></canvas></div>
-<div id="hint">WASD move &nbsp;&middot;&nbsp; Mouse aim &nbsp;&middot;&nbsp; Click/Space shoot &nbsp;&middot;&nbsp; 1-4 weapons &nbsp;&middot;&nbsp; P pause &nbsp;&middot;&nbsp; M mute</div>
+<div id="hint">WASD move &nbsp;&middot;&nbsp; Mouse aim &nbsp;&middot;&nbsp; Click/Space shoot &nbsp;&middot;&nbsp; 1-4 weapons &nbsp;&middot;&nbsp; P pause (O options) &nbsp;&middot;&nbsp; M mute</div>
 <script>
 (() => {
 "use strict";
@@ -38,15 +38,19 @@ const keys = {};
 let mouseX = W/2, mouseY = H/2, firing = false;
 addEventListener("keydown", e => {
   if (state === "name"){ handleNameKey(e); return; }
+  if (state === "settings"){ handleSettingsKey(e); return; }
+  if (state === "charselect"){ handleCharKey(e); return; }
   const k = e.key.toLowerCase(); keys[k] = true;
   if ([" ","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) e.preventDefault();
   if (k === "enter") startOrAdvance();
   if (k === "p" || k === "escape") togglePause();
   if (k === "m") muted = !muted;
+  if (k === "s" && state === "title") openSettings("title");
+  if (k === "o" && state === "pause") openSettings("pause");
   if (/^[1-9]$/.test(k) && player.weapons){ const i = +k-1; if (i < player.weapons.length) player.weapon = i; }
 });
 function handleNameKey(e){
-  if (e.key === "Enter"){ if (playerName.trim()){ playerName = playerName.trim(); localStorage.setItem("hotdogNights.name", playerName); state="story"; storyPage=0; } e.preventDefault(); return; }
+  if (e.key === "Enter"){ if (playerName.trim()){ playerName = playerName.trim(); localStorage.setItem("hotdogNights.name", playerName); state="charselect"; } e.preventDefault(); return; }
   if (e.key === "Backspace"){ playerName = playerName.slice(0,-1); e.preventDefault(); return; }
   if (e.key.length === 1 && /[A-Za-z0-9 _!\-]/.test(e.key) && playerName.length < 14){ playerName += e.key; e.preventDefault(); }
 }
@@ -61,15 +65,17 @@ cv.addEventListener("wheel", e => { if (state==="play" && player.weapons.length>
   player.weapon = (player.weapon + (e.deltaY>0?1:player.weapons.length-1)) % player.weapons.length; } }, {passive:false});
 
 //============================================================ AUDIO
-let actx=null, master=null, musicGain=null, muted=false, noiseBuf=null;
+let actx=null, master=null, musicGain=null, sfxGain=null, muted=false, noiseBuf=null;
 let musicTimer=null, mi=0;
 function audioInit(){ if (actx) return; try {
   actx = new (window.AudioContext||window.webkitAudioContext)();
   master = actx.createGain(); master.gain.value = 0.4; master.connect(actx.destination);
   musicGain = actx.createGain(); musicGain.gain.value = 0.5; musicGain.connect(master);
+  sfxGain = actx.createGain(); sfxGain.gain.value = 0.9; sfxGain.connect(master);
   noiseBuf = actx.createBuffer(1, actx.sampleRate*0.4, actx.sampleRate);
   const d = noiseBuf.getChannelData(0); for (let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
   if (!musicTimer) musicTimer = setInterval(musicTick, 150);
+  applySettings();
 } catch(e){} }
 function beep(freq, dur, type="square", vol=1, slideTo=null){
   if (!actx || muted) return;
@@ -78,14 +84,14 @@ function beep(freq, dur, type="square", vol=1, slideTo=null){
   if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1,slideTo), actx.currentTime+dur);
   g.gain.setValueAtTime(vol, actx.currentTime);
   g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+dur);
-  o.connect(g); g.connect(master); o.start(); o.stop(actx.currentTime+dur);
+  o.connect(g); g.connect(sfxGain); o.start(); o.stop(actx.currentTime+dur);
 }
 function noise(dur, vol, freq=1000){ if (!actx||muted) return;
   const s=actx.createBufferSource(); s.buffer=noiseBuf;
   const g=actx.createGain(); g.gain.setValueAtTime(vol,actx.currentTime);
   g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+dur);
   const f=actx.createBiquadFilter(); f.type="lowpass"; f.frequency.value=freq;
-  s.connect(f); f.connect(g); g.connect(master); s.start(); s.stop(actx.currentTime+dur);
+  s.connect(f); f.connect(g); g.connect(sfxGain); s.start(); s.stop(actx.currentTime+dur);
 }
 function mnote(freq, dur, type, vol){ if (!actx||muted) return;
   const o=actx.createOscillator(), g=actx.createGain(); o.type=type; o.frequency.value=freq;
@@ -130,11 +136,11 @@ const SP_PLAYER = ["..kkkk..",".khhhhk.",".kssssk.",".kssssk.",".kbbbbk.","kbbbb
 const SP_HOTDOG = ["...ooooo...","..odrrrdo..",".odrrrrrdo.",".orrrrrrro.","orwwrrrwwro","orworrrowro","orrrrrrrrro","oroooooooro","orotototoro","oroooooooro",".orrrrrrro.",".nnrrrrrnn.",".nnryrrrnn.",".nnrrryrnn.",".nnryrrrnn.",".nnrrrrrnn.","..nnrrrnn..","..ll...ll.."];
 const SP_GUN = ["........","..cccc..",".cccccg.","ccccccgg",".cc..ggg",".gg.....",".gg.....","........"];
 const SP_CRATE = ["eeeeee","eaaaae","eaeaea","eaeaea","eaaaae","eeeeee"];
-function drawSprite(grid, cx, cy, scale, flip=1){
+function drawSprite(grid, cx, cy, scale, flip=1, ov=null){
   const gw=grid[0].length, gh=grid.length, ox=cx-(gw*scale)/2, oy=cy-(gh*scale)/2;
   for (let row=0; row<gh; row++){ const line=grid[row];
     for (let col=0; col<gw; col++){ const ch=line[col]; if (ch===".") continue;
-      const color=PAL[ch]; if (!color) continue; ctx.fillStyle=color;
+      const color=(ov&&ov[ch])||PAL[ch]; if (!color) continue; ctx.fillStyle=color;
       const dx = flip<0 ? ox+(gw-1-col)*scale : ox+col*scale;
       ctx.fillRect(Math.round(dx), Math.round(oy+row*scale), scale, scale); } }
 }
@@ -193,11 +199,56 @@ function farPoint(){ let p; for(let i=0;i<60;i++){ p=freeWorldPoint(); if(Math.h
 let state="title", night=1, score=0, storyPage=0;
 let best=parseInt(localStorage.getItem("hotdogNights.best")||"0",10);
 let playerName=localStorage.getItem("hotdogNights.name")||"";
-const player={ x:0,y:0,r:11,hp:100,armed:false,aim:-Math.PI/2,lastHit:-10,fireCd:0,ammo:0,flip:1,
+const player={ x:0,y:0,r:11,hp:100,maxHp:100,speedMul:1,ammoBonus:0,armed:false,aim:-Math.PI/2,lastHit:-10,fireCd:0,ammo:0,flip:1,
   weapons:[],weapon:0,newWeapon:null };
 let boss=null, bullets=[], globs=[], packets=[], parts=[], crates=[], gun=null;
 let nightTime=0, NIGHT_LEN=80, introTimer=0, crateTimer=0, shake=0;
 const SPEED=2.7;
+const AMMO_MAX=250, START_AMMO=150, CRATE_AMMO=60, NIGHT_REFILL=100;
+
+//============================================================ OPTIONS / SETTINGS
+const opt = Object.assign({ master:80, music:55, sfx:90, sens:4, bright:5, shake:1 },
+  JSON.parse(localStorage.getItem("hotdogNights.opt")||"{}"));
+let aimLerp=0.4, shakeMul=1, brightLevel=5;
+const aimPt = { x:W/2, y:H/2 };
+const SETTINGS = [
+  {k:"master",label:"Master Volume",  min:0,max:100,step:10,fmt:v=>v+"%"},
+  {k:"music", label:"Music Volume",   min:0,max:100,step:10,fmt:v=>v+"%"},
+  {k:"sfx",   label:"SFX Volume",     min:0,max:100,step:10,fmt:v=>v+"%"},
+  {k:"sens",  label:"Aim Sensitivity",min:1,max:10, step:1, fmt:v=>String(v)},
+  {k:"bright",label:"Brightness",     min:1,max:10, step:1, fmt:v=>String(v)},
+  {k:"shake", label:"Screen Shake",   min:0,max:1,  step:1, fmt:v=>v?"ON":"OFF"},
+];
+let settingsSel=0, settingsFrom="title";
+function applySettings(){
+  aimLerp = 0.12 + (opt.sens-1)/9*0.88; shakeMul = opt.shake; brightLevel = opt.bright;
+  if (actx){ master.gain.value=(opt.master/100)*0.8; musicGain.gain.value=(opt.music/100)*0.7; sfxGain.gain.value=(opt.sfx/100); }
+}
+function saveSettings(){ localStorage.setItem("hotdogNights.opt", JSON.stringify(opt)); applySettings(); }
+function openSettings(from){ audioInit(); settingsFrom=from; settingsSel=0; state="settings"; }
+function handleSettingsKey(e){ const k=e.key;
+  if (k==="ArrowUp") settingsSel=(settingsSel-1+SETTINGS.length)%SETTINGS.length;
+  else if (k==="ArrowDown") settingsSel=(settingsSel+1)%SETTINGS.length;
+  else if (k==="ArrowLeft"||k==="ArrowRight"){ const s=SETTINGS[settingsSel], d=(k==="ArrowRight"?1:-1);
+    opt[s.k]=Math.max(s.min,Math.min(s.max,opt[s.k]+d*s.step)); applySettings(); }
+  else if (k==="Enter"||k==="Escape"||k==="Backspace"){ saveSettings(); state=settingsFrom; }
+  e.preventDefault();
+}
+const CHARS = [
+  {name:"MAURICE", b:"#2e86c1", h:"#3a2410", perk:"All-rounder"},
+  {name:"BLAZE",   b:"#e74c3c", h:"#16110f", perk:"+15% move speed", speedMul:1.15},
+  {name:"VERDE",   b:"#27ae60", h:"#3a2410", perk:"+25 max HP", hpBonus:25},
+  {name:"NOVA",    b:"#9b59b6", h:"#efd6b6", perk:"+60 start ammo", ammoBonus:60},
+];
+let charSel = parseInt(localStorage.getItem("hotdogNights.char")||"0",10) || 0;
+function handleCharKey(e){ const k=e.key;
+  if (k==="ArrowLeft") charSel=(charSel-1+CHARS.length)%CHARS.length;
+  else if (k==="ArrowRight") charSel=(charSel+1)%CHARS.length;
+  else if (k==="Enter"){ localStorage.setItem("hotdogNights.char",String(charSel)); state="story"; storyPage=0; }
+  else if (k==="Escape"||k==="Backspace") state="name";
+  e.preventDefault();
+}
+applySettings();
 
 function cfg(n){ return {
   speed: 1.15 + 0.2*(n-1),
@@ -221,7 +272,9 @@ const BEAT = {
   5:"Final night. Everything he's got. End it.",
 };
 
-function beginRun(){ night=1; score=0; player.hp=100; player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0;
+function beginRun(){ const ch=CHARS[charSel]||CHARS[0];
+  player.maxHp=100+(ch.hpBonus||0); player.speedMul=ch.speedMul||1; player.ammoBonus=ch.ammoBonus||0;
+  night=1; score=0; player.hp=player.maxHp; player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0;
   startNight(1); state="intro"; introTimer=2.6; }
 function grantFor(n){ const map={2:"smg",3:"shotgun",4:"plasma"}; const id=map[n]; if(!id) return;
   if(!player.weapons.includes(id)){ player.weapons.push(id); player.weapon=player.weapons.length-1;
@@ -230,7 +283,7 @@ function startNight(n){
   night=n; const c=cfg(n); buildMap();
   player.x=22*TS+TS/2; player.y=16*TS+TS/2; player.fireCd=0; player.newWeapon=null; player.lastHit=-10;
   if(n===1){ player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0; gun={x:36*TS+TS/2,y:7*TS+TS/2,t:0}; }
-  else { player.armed=true; gun=null; grantFor(n); player.ammo=Math.min(99, player.ammo+30); }
+  else { player.armed=true; gun=null; grantFor(n); player.ammo=Math.min(AMMO_MAX, player.ammo+NIGHT_REFILL); }
   const p=farPoint();
   boss={ x:p.x,y:p.y,r:20,hp:c.hp,maxHP:c.hp,wobble:Math.random()*6,growlT:1,flip:1,
          atkP:c.packetEvery*0.7, atkS:c.shootEvery, tele:0, enraged:false, hitFlash:0, dead:false };
@@ -254,7 +307,7 @@ function winGame(){ state="win"; firing=false; sfx.win(); if(5>best){ best=5; lo
 function clearNight(){ score+=500; shake=0.6; sfx.kill();
   burst(boss.x,boss.y,60,"#c0392b",7,1.0,5); burst(boss.x,boss.y,30,"#f4d03f",6,0.9,4);
   if(night>=5) winGame();
-  else { player.hp=Math.min(100, player.hp+25); startNight(night+1); state="intro"; introTimer=2.8; } }
+  else { player.hp=Math.min(player.maxHp, player.hp+25); startNight(night+1); state="intro"; introTimer=2.8; } }
 function fireGlobs(c,enr){ const base=Math.atan2(player.y-boss.y, player.x-boss.x);
   const angs = c.shootSpread ? [base-0.28,base,base+0.28] : [base]; const spd=3.4*(enr?1.25:1);
   angs.forEach(a=>globs.push({x:boss.x+Math.cos(a)*22,y:boss.y+Math.sin(a)*22,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,life:2.6,r:9,dmg:12}));
@@ -264,7 +317,9 @@ function fireGlobs(c,enr){ const base=Math.atan2(player.y-boss.y, player.x-boss.
 function update(dt){
   const f=dt*60;
   player.fireCd=Math.max(0,player.fireCd-dt); shake=Math.max(0,shake-dt);
-  const mwx=mouseX+camX, mwy=mouseY+camY;
+  const t=Math.min(1, aimLerp*f);                       // aim sensitivity: crosshair eases toward cursor
+  aimPt.x += (mouseX-aimPt.x)*t; aimPt.y += (mouseY-aimPt.y)*t;
+  const mwx=aimPt.x+camX, mwy=aimPt.y+camY;
   player.aim=Math.atan2(mwy-player.y, mwx-player.x);
   if(Math.cos(player.aim)!==0) player.flip=Math.cos(player.aim)<0?-1:1;
 
@@ -274,11 +329,11 @@ function update(dt){
   if(keys["s"]||keys["arrowdown"]) dy+=1;
   if(keys["a"]||keys["arrowleft"]) dx-=1;
   if(keys["d"]||keys["arrowright"]) dx+=1;
-  if(dx||dy){ const m=Math.hypot(dx,dy); moveEntity(player,dx/m*SPEED*f,dy/m*SPEED*f); }
+  if(dx||dy){ const m=Math.hypot(dx,dy), sp=SPEED*player.speedMul*f; moveEntity(player,dx/m*sp,dy/m*sp); }
 
   // gun pickup
   if(gun){ gun.t+=dt; if(Math.hypot(gun.x-player.x,gun.y-player.y)<28){
-    player.armed=true; player.weapons=["pistol"]; player.weapon=0; player.ammo=40; gun=null; sfx.pickup();
+    player.armed=true; player.weapons=["pistol"]; player.weapon=0; player.ammo=START_AMMO+player.ammoBonus; gun=null; sfx.pickup();
     burst(player.x,player.y,24,"#34e7ff",5,0.6,3); } }
 
   // shooting
@@ -349,7 +404,7 @@ function update(dt){
   // ammo crates
   if(player.armed){ crateTimer-=dt; if(crateTimer<=0 && crates.length<2){ const p=freeWorldPoint(); crates.push({x:p.x,y:p.y}); crateTimer=10; }
     for(let i=crates.length-1;i>=0;i--){ const cr=crates[i];
-      if(Math.hypot(cr.x-player.x,cr.y-player.y)<26){ player.ammo=Math.min(99,player.ammo+15); crates.splice(i,1); sfx.ammo(); burst(player.x,player.y,12,"#f4d03f",4,0.4,3); } } }
+      if(Math.hypot(cr.x-player.x,cr.y-player.y)<26){ player.ammo=Math.min(AMMO_MAX,player.ammo+CRATE_AMMO); crates.splice(i,1); sfx.ammo(); burst(player.x,player.y,12,"#f4d03f",4,0.4,3); } } }
 
   // particles + clock
   for(const p of parts){ p.x+=p.vx*f; p.y+=p.vy*f; p.vx*=0.92; p.vy*=0.92; p.life-=dt; }
@@ -359,7 +414,7 @@ function update(dt){
 
 //============================================================ CAMERA
 let camX=0, camY=0;
-function updateCamera(){ let sx=0,sy=0; if(shake>0){ sx=(Math.random()-0.5)*shake*30; sy=(Math.random()-0.5)*shake*30; }
+function updateCamera(){ let sx=0,sy=0; if(shake>0&&shakeMul){ sx=(Math.random()-0.5)*shake*30*shakeMul; sy=(Math.random()-0.5)*shake*30*shakeMul; }
   camX=Math.max(0,Math.min(WORLD_W-W,player.x-W/2))+sx; camY=Math.max(0,Math.min(WORLD_H-H,player.y-H/2))+sy; }
 
 //============================================================ RENDER
@@ -399,7 +454,7 @@ function render(){
     if(boss.hitFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,boss.hitFlash*6); ctx.fillStyle="#fff"; ctx.fillRect(bx-22,by-36,44,72); ctx.restore(); } }
 
   // player
-  drawSprite(SP_PLAYER, player.x-camX, player.y-camY, 3, player.flip);
+  drawSprite(SP_PLAYER, player.x-camX, player.y-camY, 3, player.flip, CHARS[charSel]);
   if(player.armed){ const a=player.aim, bx=player.x-camX, by=player.y-camY;
     ctx.strokeStyle="#9a9aae"; ctx.lineWidth=4; ctx.lineCap="round";
     ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+Math.cos(a)*20,by+Math.sin(a)*20); ctx.stroke();
@@ -433,24 +488,27 @@ function render(){
   drawHUD();
   if(state==="title") drawTitle();
   if(state==="name") drawName();
+  if(state==="charselect") drawCharSelect();
+  if(state==="settings") drawSettings();
   if(state==="story") drawStory();
   if(state==="intro") drawIntro();
-  if(state==="pause") drawCenter("PAUSED","Press P to resume","#34e7ff");
+  if(state==="pause") drawPause();
   if(state==="over") drawOver();
   if(state==="win") drawWin();
 }
 function drawLighting(){
-  lctx.globalCompositeOperation="source-over"; lctx.fillStyle="rgba(2,2,12,0.93)"; lctx.fillRect(0,0,W,H);
+  const darkA=Math.max(0.45,Math.min(0.95, 0.98-brightLevel*0.05)), amb=140+brightLevel*10;
+  lctx.globalCompositeOperation="source-over"; lctx.fillStyle="rgba(2,2,12,"+darkA+")"; lctx.fillRect(0,0,W,H);
   const px=player.x-camX, py=player.y-camY; lctx.globalCompositeOperation="destination-out";
-  let g=lctx.createRadialGradient(px,py,4,px,py,180); g.addColorStop(0,"rgba(0,0,0,0.95)"); g.addColorStop(0.7,"rgba(0,0,0,0.6)"); g.addColorStop(1,"rgba(0,0,0,0)");
-  lctx.fillStyle=g; lctx.beginPath(); lctx.arc(px,py,180,0,7); lctx.fill();
+  let g=lctx.createRadialGradient(px,py,4,px,py,amb); g.addColorStop(0,"rgba(0,0,0,0.95)"); g.addColorStop(0.7,"rgba(0,0,0,0.6)"); g.addColorStop(1,"rgba(0,0,0,0)");
+  lctx.fillStyle=g; lctx.beginPath(); lctx.arc(px,py,amb,0,7); lctx.fill();
   const a=player.aim, len=360, spread=0.62; lctx.beginPath(); lctx.moveTo(px,py); lctx.arc(px,py,len,a-spread,a+spread); lctx.closePath();
   let cg=lctx.createRadialGradient(px,py,10,px,py,len); cg.addColorStop(0,"rgba(0,0,0,1)"); cg.addColorStop(0.65,"rgba(0,0,0,0.55)"); cg.addColorStop(1,"rgba(0,0,0,0)");
   lctx.fillStyle=cg; lctx.fill(); lctx.globalCompositeOperation="source-over"; ctx.drawImage(lcv,0,0);
 }
 
 //============================================================ RETICLE + HUD
-function drawReticle(){ const x=mouseX,y=mouseY; ctx.save(); ctx.globalCompositeOperation="lighter";
+function drawReticle(){ const x=aimPt.x,y=aimPt.y; ctx.save(); ctx.globalCompositeOperation="lighter";
   if(player.armed){ const px=player.x-camX,py=player.y-camY; ctx.strokeStyle="rgba(52,231,255,0.22)"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(x,y); ctx.stroke(); }
   ctx.strokeStyle="#34e7ff"; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(x,y,9,0,7); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(x-15,y); ctx.lineTo(x-5,y); ctx.moveTo(x+5,y); ctx.lineTo(x+15,y); ctx.moveTo(x,y-15); ctx.lineTo(x,y-5); ctx.moveTo(x,y+5); ctx.lineTo(x,y+15); ctx.stroke();
@@ -461,7 +519,7 @@ function drawHUD(){
   ctx.textAlign="left"; ctx.fillStyle="rgba(5,5,15,0.7)"; ctx.fillRect(0,0,W,40);
   ctx.fillStyle="#ff3b3b"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText("NIGHT "+night, 16, 27);
   if(playerName){ ctx.fillStyle="#7a7a9a"; ctx.font="12px Trebuchet MS"; ctx.fillText(playerName.toUpperCase(), 110, 26); }
-  const prog=Math.min(1,nightTime/NIGHT_LEN), hr=Math.min(5,Math.floor(prog*6)), label=(hr===0?12:hr)+" AM";
+  const prog=Math.min(1,nightTime/NIGHT_LEN), hr=Math.floor(prog*6), label=(hr<=0?12:hr)+" AM";
   ctx.fillStyle="#e8e8f0"; ctx.font="bold 16px Trebuchet MS"; ctx.textAlign="center"; ctx.fillText(label, W/2, 17);
   ctx.fillStyle="#1a1a2e"; ctx.fillRect(W/2-90,22,180,4); ctx.fillStyle="#9a7bff"; ctx.fillRect(W/2-90,22,180*prog,4);
   ctx.textAlign="right"; ctx.fillStyle="#f4d03f"; ctx.font="bold 16px Trebuchet MS"; ctx.fillText("SCORE "+score, W-16, 19);
@@ -476,9 +534,10 @@ function drawHUD(){
     ctx.fillText("FRANKIE THE HOTDOG"+(boss.enraged?"  -  ENRAGED!":""), W/2, byy+10.5); }
   // hp
   ctx.textAlign="left"; ctx.fillStyle="#1a1a2e"; ctx.fillRect(16,H-34,200,18);
-  const hpc=player.hp>50?"#3ddc84":player.hp>25?"#f4d03f":"#ff3b3b"; ctx.fillStyle=hpc; ctx.fillRect(16,H-34,200*(player.hp/100),18);
+  const ratio=Math.max(0,player.hp/player.maxHp), hpc=ratio>0.5?"#3ddc84":ratio>0.25?"#f4d03f":"#ff3b3b";
+  ctx.fillStyle=hpc; ctx.fillRect(16,H-34,200*ratio,18);
   ctx.strokeStyle="#444"; ctx.lineWidth=1; ctx.strokeRect(16,H-34,200,18);
-  ctx.fillStyle="#fff"; ctx.font="bold 12px Trebuchet MS"; ctx.fillText("HP "+Math.ceil(player.hp), 22, H-21);
+  ctx.fillStyle="#fff"; ctx.font="bold 12px Trebuchet MS"; ctx.fillText("HP "+Math.ceil(player.hp)+"/"+player.maxHp, 22, H-21);
   // weapons / objective
   if(player.armed){ let wx=300; ctx.textAlign="left";
     player.weapons.forEach((id,i)=>{ const on=i===player.weapon;
@@ -495,8 +554,9 @@ function drawTitle(){ dim(); ctx.textAlign="center";
   ctx.fillStyle="#ff3b3b"; ctx.font="bold 60px Trebuchet MS"; ctx.fillText("HOTDOG NIGHTS", W/2, H/2-78);
   ctx.fillStyle="#34e7ff"; ctx.font="bold 24px Trebuchet MS"; ctx.fillText(">>  XTREME ACTION PARK  <<", W/2, H/2-42);
   ctx.fillStyle="#cfcfe0"; ctx.font="16px Trebuchet MS"; ctx.fillText("The mascot wakes at midnight. Five nights. One hotdog. Survive.", W/2, H/2+2);
-  ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  CLICK or press ENTER", W/2, H/2+62);
-  ctx.fillStyle="#5a5a7a"; ctx.font="13px Trebuchet MS"; ctx.fillText("WASD move | mouse aim | click/space shoot | 1-4 swap weapon | P pause | M mute", W/2, H/2+100); }
+  ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  ENTER to play       S for settings", W/2, H/2+62);
+  ctx.fillStyle="#5a5a7a"; ctx.font="13px Trebuchet MS"; ctx.fillText("WASD move | mouse aim | click/space shoot | 1-4 swap weapon | P pause | M mute", W/2, H/2+100);
+  if(best>0){ ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Best night reached: "+best, W/2, H/2+126); } }
 function drawName(){ dim(); ctx.textAlign="center";
   ctx.fillStyle="#34e7ff"; ctx.font="bold 32px Trebuchet MS"; ctx.fillText("WHO'S WORKING TONIGHT?", W/2, H/2-58);
   ctx.fillStyle="#cfcfe0"; ctx.font="15px Trebuchet MS"; ctx.fillText("Type your name, then press ENTER", W/2, H/2-26);
@@ -527,6 +587,29 @@ function drawWin(){ dim(); ctx.textAlign="center";
   wrap("Frankie collapses into a steaming pile of relish and regret. The park is yours again - and you'll smell like mustard for the rest of your life.",640).forEach((ln,i)=>ctx.fillText(ln,W/2,H/2-6+i*26));
   ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText((playerName?playerName.toUpperCase()+" SURVIVED ALL 5 NIGHTS":"YOU SURVIVED ALL 5 NIGHTS")+"  -  Score: "+score, W/2, H/2+70);
   ctx.fillStyle="#5a5a7a"; ctx.font="14px Trebuchet MS"; ctx.fillText("CLICK or press ENTER for the title", W/2, H/2+104); }
+function drawPause(){ drawCenter("PAUSED","Press P to resume","#34e7ff");
+  ctx.textAlign="center"; ctx.fillStyle="#7a7a9a"; ctx.font="14px Trebuchet MS";
+  ctx.fillText("O: Options      M: "+(muted?"Unmute":"Mute"), W/2, H/2+74); }
+function drawSettings(){ dim(); ctx.textAlign="center";
+  ctx.fillStyle="#34e7ff"; ctx.font="bold 40px Trebuchet MS"; ctx.fillText("SETTINGS", W/2, 110);
+  SETTINGS.forEach((s,i)=>{ const y=178+i*48, on=i===settingsSel;
+    ctx.textAlign="left"; ctx.font="18px Trebuchet MS"; ctx.fillStyle=on?"#f4d03f":"#cfcfe0";
+    ctx.fillText((on?"> ":"   ")+s.label, W/2-230, y);
+    const frac=(opt[s.k]-s.min)/(s.max-s.min);
+    ctx.fillStyle="#1a1a2e"; ctx.fillRect(W/2+30,y-14,170,16);
+    ctx.fillStyle=on?"#34e7ff":"#3a6a78"; ctx.fillRect(W/2+30,y-14,170*frac,16);
+    ctx.textAlign="left"; ctx.fillStyle="#fff"; ctx.font="bold 15px Trebuchet MS"; ctx.fillText(s.fmt(opt[s.k]), W/2+210, y-1); });
+  ctx.textAlign="center"; ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS";
+  ctx.fillText("Up/Down select    Left/Right adjust    ENTER or ESC to go back", W/2, H-46); }
+function drawCharSelect(){ dim(); ctx.textAlign="center";
+  ctx.fillStyle="#34e7ff"; ctx.font="bold 36px Trebuchet MS"; ctx.fillText("CHOOSE YOUR CHARACTER", W/2, 110);
+  const gap=W/(CHARS.length+1);
+  CHARS.forEach((c,i)=>{ const x=gap*(i+1), y=H/2-10, on=i===charSel;
+    if(on){ ctx.fillStyle="rgba(52,231,255,0.12)"; ctx.fillRect(x-58,y-92,116,176); ctx.strokeStyle="#34e7ff"; ctx.lineWidth=2; ctx.strokeRect(x-58,y-92,116,176); }
+    drawSprite(SP_PLAYER, x, y-34, 5, 1, c);
+    ctx.fillStyle=on?"#f4d03f":"#cfcfe0"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText(c.name, x, y+44);
+    ctx.fillStyle=on?"#9fefff":"#7a7a9a"; ctx.font="12px Trebuchet MS"; wrap(c.perk,108).forEach((ln,j)=>ctx.fillText(ln,x,y+64+j*15)); });
+  ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Left/Right to choose    ENTER to confirm    ESC to go back", W/2, H-46); }
 
 //============================================================ LOOP
 let last=performance.now();
