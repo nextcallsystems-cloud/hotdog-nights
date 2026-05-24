@@ -461,10 +461,12 @@ function startGodLevel(){
   else { unlockAllWeapons("FULL ARSENAL"); player.ammo=AMMO_MAX; player.hp=player.maxHp; }
   boss=null; bullets=[]; globs=[]; packets=[]; parts=[]; crates=[]; gremlins=[]; crateTimer=5; nightTime=0; shake=0;
   glizzies=[];
-  const spots=[[8,8],[35,8],[8,23],[35,23],[22,4]];
   const hp=Math.round(85*d.hpMul);
-  for(const s of spots) glizzies.push({ x:s[0]*TS+TS/2, y:s[1]*TS+TS/2, r:24, hp:hp, maxHP:hp,
-    wobble:Math.random()*6, flip:1, spawnT:1.5+Math.random()*2, globT:2+Math.random()*3, hitFlash:0, dead:false });
+  for(let k=0;k<5;k++){ let pt=freeWorldPoint();
+    for(let tries=0;tries<200;tries++){ const c2=freeWorldPoint();
+      if(Math.hypot(c2.x-player.x,c2.y-player.y)>260 && glizzies.every(g=>Math.hypot(g.x-c2.x,g.y-c2.y)>150)){ pt=c2; break; } }
+    glizzies.push({ x:pt.x, y:pt.y, r:24, hp:hp, maxHP:hp,
+      wobble:Math.random()*6, flip:1, spawnT:1.5+Math.random()*2, globT:2+Math.random()*3, hitFlash:0, dead:false }); }
   state="intro"; introTimer=3.2;
 }
 function godWin(){ state="godwin"; god=false; resetSticks(); sfx.win(); confettiBurst();
@@ -514,8 +516,8 @@ function update(dt){
   }
   if(player.ammoInfinite) player.ammo=MOONK.ammoMax;
 
-  // bullets
-  for(const b of bullets){ b.x+=b.vx*f; b.y+=b.vy*f; b.life-=dt;
+  // bullets (check collisions BEFORE advancing so point-blank shots still register)
+  for(const b of bullets){ b.life-=dt;
     if(collides(b.x,b.y,2)){ b.life=0; burst(b.x,b.y,4,"#9fefff",3,0.2,2); continue; }
     if(boss&&!boss.dead && Math.hypot(boss.x-b.x,boss.y-b.y)<boss.r){
       boss.hp-=b.dmg; boss.hitFlash=0.09; sfx.bosshit(); burst(b.x,b.y,4,"#fff",3,0.2,2);
@@ -537,6 +539,7 @@ function update(dt){
     for(const pk of packets){ if(pk.dead) continue;
       if(Math.hypot(pk.x-b.x,pk.y-b.y)<pk.r+2){ pk.dead=true; score+=15; burst(pk.x,pk.y,8,"#c0392b",4,0.3,2); sfx.pop();
         if(b.pierce>0) b.pierce--; else b.life=0; break; } }
+    if(b.life>0){ b.x+=b.vx*f; b.y+=b.vy*f; }
   }
   bullets=bullets.filter(b=>b.life>0);
 
