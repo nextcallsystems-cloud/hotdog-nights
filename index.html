@@ -54,10 +54,12 @@ addEventListener("keydown", e => {
   if (state === "settings"){ handleSettingsKey(e); return; }
   if (state === "charselect"){ handleCharKey(e); return; }
   if (state === "difficulty"){ handleDiffKey(e); return; }
+  if (state === "help"){ if(["Enter","Escape","Backspace"," ","h","H"].includes(e.key)) state=helpFrom; e.preventDefault(); return; }
   const k = e.key.toLowerCase(); keys[k] = true;
   if (/^[a-z]$/.test(k)){ cheatBuf=(cheatBuf+k).slice(-8); if(cheatBuf.endsWith("moonk")) activateMoonk(); }
   if ([" ","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) e.preventDefault();
   if (k === "g" && state === "win"){ startGodLevel(); return; }
+  if (k === "h" && (state === "title" || state === "pause")){ helpFrom=state; state="help"; return; }
   if (k === "enter") startOrAdvance();
   if (k === "p" || k === "escape") togglePause();
   if (k === "m") muted = !muted;
@@ -105,6 +107,7 @@ function handleTouchStart(id,p){
     return; }
   const b=hitBtn(uiButtons,p); if(b){ b.fn(); return; }
   if(state==="name"){ if(nm) nm.focus(); return; }
+  if(state==="help"){ state=helpFrom; return; }
   if(["title","story","intro","over","godwin"].includes(state)) startOrAdvance();
 }
 function handleTouchMove(id,p){ if(id===touchMove.id) stickSet(touchMove,p); if(id===touchAim.id) stickSet(touchAim,p); }
@@ -238,9 +241,10 @@ function glow(x, y, radius, color){
 //============================================================ WEAPONS
 const WEAPONS = {
   pistol: {name:"PISTOL",  dmg:1.0, cd:0.16, pellets:1, spread:0.04, cost:1, speed:9,  pierce:0, color:"#34e7ff", sound:"pew"},
-  smg:    {name:"MG",      dmg:0.7, cd:0.07, pellets:1, spread:0.11, cost:1, speed:10, pierce:0, color:"#7fffd4", sound:"mg"},
+  smg:    {name:"MG",      dmg:0.7, cd:0.07, pellets:1, spread:0.11, cost:1, speed:10, pierce:0, color:"#7fffd4", sound:"mg", gatling:true},
   shotgun:{name:"SHOTGUN", dmg:0.8, cd:0.55, pellets:6, spread:0.42, cost:3, speed:9,  pierce:0, color:"#ffd24a", sound:"boom"},
   plasma: {name:"PLASMA",  dmg:2.4, cd:0.24, pellets:1, spread:0.02, cost:2, speed:13, pierce:2, color:"#ff5ae0", sound:"zap"},
+  pmg:    {name:"P-MINIGUN",dmg:1.7, cd:0.05, pellets:1, spread:0.10, cost:1, speed:13, pierce:2, color:"#ff5ae0", sound:"zap", gatling:true},
 };
 
 //============================================================ MAP
@@ -277,9 +281,9 @@ function farPoint(){ let p; for(let i=0;i<60;i++){ p=freeWorldPoint(); if(Math.h
 let state="title", night=1, score=0, storyPage=0;
 let best=parseInt(localStorage.getItem("hotdogNights.best")||"0",10);
 let playerName=localStorage.getItem("hotdogNights.name")||"";
-const VERSION="v9";
+const VERSION="v10";
 const player={ x:0,y:0,r:11,hp:100,maxHp:100,speedMul:1,ammoBonus:0,armed:false,aim:-Math.PI/2,lastHit:-10,fireCd:0,ammo:0,flip:1,
-  weapons:[],weapon:0,newWeapon:null,
+  weapons:[],weapon:0,newWeapon:null,gatSpin:0,
   damageMul:1,fireMul:1,resist:1,regen:0,ammoInfinite:false,startAllWeapons:false,moonk:false };
 let boss=null, bullets=[], globs=[], packets=[], parts=[], crates=[], gun=null;
 // MOONK cheat (type "moonk" or name yourself MOONK), difficulty, and post-win GOD LEVEL state.
@@ -287,6 +291,7 @@ let cheatMoonk=false, cheatBuf="", banner=null;
 let god=false, glizzies=[], gremlins=[];
 let glizzler=null, greasePuddles=[];        // god-level final boss + grease hazards
 let combo=0, comboT=0, comboMul=1;           // kill-combo score multiplier
+let helpFrom="title";                        // where the HOW-TO-PLAY screen returns to
 let bestGod=parseInt(localStorage.getItem("hotdogNights.god")||"0",10);
 let nightTime=0, NIGHT_LEN=80, introTimer=0, crateTimer=0, shake=0;
 const SPEED=2.7;
@@ -487,7 +492,9 @@ function startGodLevel(){
   player.x=22*TS+TS/2; player.y=16*TS+TS/2; player.fireCd=0; player.lastHit=-10; player.newWeapon=null;
   player.armed=true; gun=null;
   if(cheatMoonk) applyMoonkLoadout();
-  else { unlockAllWeapons("FULL ARSENAL"); player.ammo=AMMO_MAX; player.hp=player.maxHp; }
+  else { player.ammo=AMMO_MAX; player.hp=player.maxHp; }
+  player.weapons=["pistol","smg","shotgun","plasma","pmg"]; player.weapon=4;
+  player.newWeapon={name:"PLASMA MINIGUN", key:"5"};
   boss=null; bullets=[]; globs=[]; packets=[]; parts=[]; crates=[]; gremlins=[]; crateTimer=5; nightTime=0; shake=0;
   glizzler=null; greasePuddles=[]; resetCombo();
   glizzies=[];
@@ -552,6 +559,7 @@ function update(dt){
     } else { player.fireCd=0.25; sfx.empty(); }
   }
   if(player.ammoInfinite) player.ammo=MOONK.ammoMax;
+  player.gatSpin=(player.gatSpin||0)+((firing||keys[" "]||touchShoot)?dt*26:dt*5);
 
   // bullets (check collisions BEFORE advancing so point-blank shots still register)
   for(const b of bullets){ b.life-=dt;
@@ -704,6 +712,20 @@ function updateCamera(){ let sx=0,sy=0; if(shake>0&&shakeMul){ sx=(Math.random()
   camX=Math.max(0,Math.min(WORLD_W-W,player.x-W/2))+sx; camY=Math.max(0,Math.min(WORLD_H-H,player.y-H/2))+sy; }
 
 //============================================================ RENDER
+// Gatling/minigun muzzle: a housing + 3 barrels that spin while firing, drawn along the aim.
+function drawGatling(bx,by,a,wpn,spin){
+  const ca=Math.cos(a), sa=Math.sin(a), px=-sa, py=ca;
+  const baseX=bx+ca*9, baseY=by+sa*9, muzX=bx+ca*27, muzY=by+sa*27;
+  ctx.lineCap="round";
+  ctx.strokeStyle="#5c5c70"; ctx.lineWidth=9; ctx.beginPath(); ctx.moveTo(baseX,baseY); ctx.lineTo(muzX,muzY); ctx.stroke();
+  ctx.strokeStyle="#3a3a48"; ctx.lineWidth=10; ctx.beginPath(); ctx.moveTo(baseX-ca*2,baseY-sa*2); ctx.lineTo(baseX+ca*1,baseY+sa*1); ctx.stroke();
+  for(let i=0;i<3;i++){ const ph=spin+i*(6.2832/3), off=Math.sin(ph)*4.2, front=Math.cos(ph)>=0;
+    const ox=px*off, oy=py*off;
+    ctx.strokeStyle=front?wpn.color:"#2c2c3a"; ctx.lineWidth=front?3:2.4;
+    ctx.beginPath(); ctx.moveTo(baseX+ox,baseY+oy); ctx.lineTo(muzX+ox,muzY+oy); ctx.stroke(); }
+  ctx.fillStyle="#9a9aae"; ctx.beginPath(); ctx.arc(baseX,baseY,5,0,7); ctx.fill();
+  ctx.fillStyle=wpn.color; ctx.beginPath(); ctx.arc(muzX,muzY,3,0,7); ctx.fill();
+}
 function teleWarnRing(e){ if(!e||e.tpWarn<=0||!e.tpTarget) return; const x=e.tpTarget.x-camX,y=e.tpTarget.y-camY, p=1-Math.max(0,Math.min(1,e.tpWarn));
   ctx.save(); ctx.globalCompositeOperation="lighter"; glow(x,y,40,"rgba(177,92,255,0.45)");
   ctx.strokeStyle="rgba(205,130,255,0.9)"; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(x,y,10+p*32,0,7); ctx.stroke();
@@ -770,11 +792,12 @@ function render(){
   drawSprite(SP_PLAYER, player.x-camX, player.y-camY, 3, player.flip, pov);
   if(cheatMoonk) drawMoonkFreeforms(player.x-camX, player.y-camY, 3, player.flip);
   if(player.armed){ const a=player.aim, bx=player.x-camX, by=player.y-camY;
-    ctx.strokeStyle="#9a9aae"; ctx.lineWidth=4; ctx.lineCap="round";
-    ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+Math.cos(a)*20,by+Math.sin(a)*20); ctx.stroke();
     const wpn=WEAPONS[player.weapons[player.weapon]];
-    ctx.strokeStyle=wpn.color; ctx.lineWidth=1.5;
-    ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+Math.cos(a)*22,by+Math.sin(a)*22); ctx.stroke(); }
+    if(wpn.gatling){ drawGatling(bx,by,a,wpn,player.gatSpin||0); }
+    else { ctx.strokeStyle="#9a9aae"; ctx.lineWidth=4; ctx.lineCap="round";
+      ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+Math.cos(a)*20,by+Math.sin(a)*20); ctx.stroke();
+      ctx.strokeStyle=wpn.color; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+Math.cos(a)*22,by+Math.sin(a)*22); ctx.stroke(); } }
 
   for(const p of parts){ ctx.globalAlpha=Math.max(0,p.life/p.max); ctx.fillStyle=p.color; ctx.fillRect(p.x-camX-p.size/2,p.y-camY-p.size/2,p.size,p.size); }
   ctx.globalAlpha=1;
@@ -820,8 +843,42 @@ function render(){
   if(state==="over") drawOver();
   if(state==="win") drawWin();
   if(state==="godwin") drawGodWin();
+  if(state==="help") drawHelp();
   if(banner) drawBanner();
 }
+function drawHelp(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
+  ctx.fillStyle="#34e7ff"; ctx.font="bold 40px Trebuchet MS"; ctx.fillText("HOW TO PLAY", W/2, 78);
+  const rows = isTouch ? [
+    ["Move","left on-screen stick"],
+    ["Aim + Fire","right stick (drag to aim, hold to shoot)"],
+    ["Switch weapon","tap the weapon slots in the HUD"],
+    ["Pause / Options","the II button (top-right)"],
+    ["",""],
+    ["GET THE GUN","Night 1: walk to the LASER TAG ARENA and grab the blaster"],
+    ["Survive","5 nights. Frankie wakes hungrier each night - on Night 3+ he TELEPORTS (purple ring = he's about to slam there)"],
+    ["GOD LEVEL","beat all 5 nights, then choose GOD LEVEL: 5 PHAT GLIZZYS, then THE BIG GLIZZLER. Plasma minigun included."],
+    ["Combo","chain kills fast for up to x12 score"],
+  ] : [
+    ["Move","W A S D  /  Arrow keys"],
+    ["Aim","mouse"],
+    ["Fire","click  /  Spacebar  (hold for the miniguns)"],
+    ["Switch weapon","number keys 1 - 5"],
+    ["Pause","P     Options: O     Mute: M     Fullscreen: F"],
+    ["",""],
+    ["GET THE GUN","Night 1: reach the LASER TAG ARENA and grab the blaster"],
+    ["Survive","5 nights. Night 3+ Frankie TELEPORTS - the purple ring shows where he'll slam, so move"],
+    ["Difficulty","Baby / Regular / Demon (Demon: Frankie teleports from Night 1)"],
+    ["GOD LEVEL","beat all 5 nights, then press G: 5 PHAT GLIZZYS + THE BIG GLIZZLER, with the plasma minigun"],
+    ["Combo","chain kills fast for up to x12 score"],
+  ];
+  let y=132; ctx.font="16px Trebuchet MS";
+  for(const [k,v] of rows){ if(!k && !v){ y+=10; continue; }
+    ctx.textAlign="right"; ctx.fillStyle="#f4d03f"; ctx.font="bold 16px Trebuchet MS"; ctx.fillText(k, W/2-16, y);
+    ctx.textAlign="left"; ctx.fillStyle="#cfcfe0"; ctx.font="15px Trebuchet MS";
+    wrap(v, W/2-40).forEach((ln,i)=>ctx.fillText(ln, W/2+16, y+i*19)); y += 19*Math.max(1,wrap(v,W/2-40).length)+8; }
+  ctx.textAlign="center";
+  if(isTouch){ pushBtn(uiButtons, W/2-80, H-58, 160, 42, "BACK", ()=>{ state=helpFrom; }); drawBtn(uiButtons[uiButtons.length-1]); }
+  else { ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("press H, ENTER or ESC to go back", W/2, H-30); } }
 function drawBanner(){ const a=Math.min(1, banner.t/0.4); ctx.save(); ctx.globalAlpha=a; ctx.textAlign="center";
   ctx.fillStyle="rgba(5,5,12,0.6)"; ctx.fillRect(0,H*0.30,W,86);
   ctx.fillStyle="#f4d03f"; ctx.font="bold 44px Trebuchet MS"; ctx.fillText(banner.big, W/2, H*0.30+44);
@@ -906,10 +963,11 @@ function drawTitle(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
   ctx.fillStyle="#34e7ff"; ctx.font="bold 24px Trebuchet MS"; ctx.fillText(">>  XTREME ACTION PARK  <<", W/2, H/2-42);
   ctx.fillStyle="#cfcfe0"; ctx.font="16px Trebuchet MS"; ctx.fillText("The mascot wakes at midnight. Five nights. One hotdog. Survive.", W/2, H/2+2);
   if(isTouch){ pushBtn(uiButtons, W/2-90, H/2+30, 180, 42, "PLAY", ()=>startOrAdvance());
-    pushBtn(uiButtons, W/2-186, H/2+82, 180, 38, "SETTINGS", ()=>openSettings("title"));
-    pushBtn(uiButtons, W/2+6, H/2+82, 180, 38, "FULLSCREEN", ()=>toggleFullscreen()); uiButtons.forEach(drawBtn); }
-  else { ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  ENTER to play       S settings       F fullscreen", W/2, H/2+62);
-    ctx.fillStyle="#5a5a7a"; ctx.font="13px Trebuchet MS"; ctx.fillText("WASD move | mouse aim | click/space shoot | 1-4 swap weapon | P pause | M mute", W/2, H/2+100); }
+    pushBtn(uiButtons, W/2-282, H/2+82, 180, 38, "HOW TO PLAY", ()=>{ helpFrom="title"; state="help"; });
+    pushBtn(uiButtons, W/2-90, H/2+82, 180, 38, "SETTINGS", ()=>openSettings("title"));
+    pushBtn(uiButtons, W/2+102, H/2+82, 180, 38, "FULLSCREEN", ()=>toggleFullscreen()); uiButtons.forEach(drawBtn); }
+  else { ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  ENTER to play       H how to play       S settings       F fullscreen", W/2, H/2+62);
+    ctx.fillStyle="#5a5a7a"; ctx.font="13px Trebuchet MS"; ctx.fillText("WASD move | mouse aim | click/space shoot | 1-5 swap weapon | P pause | M mute", W/2, H/2+100); }
   if(best>0){ ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Best night reached: "+best, W/2, H/2+150); }
   ctx.fillStyle="#3a3a52"; ctx.font="11px Trebuchet MS"; ctx.textAlign="right"; ctx.fillText("build "+VERSION, W-10, H-10); ctx.textAlign="left"; }
 function drawName(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
