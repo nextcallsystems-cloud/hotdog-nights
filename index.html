@@ -277,7 +277,7 @@ function farPoint(){ let p; for(let i=0;i<60;i++){ p=freeWorldPoint(); if(Math.h
 let state="title", night=1, score=0, storyPage=0;
 let best=parseInt(localStorage.getItem("hotdogNights.best")||"0",10);
 let playerName=localStorage.getItem("hotdogNights.name")||"";
-const VERSION="v8";
+const VERSION="v9";
 const player={ x:0,y:0,r:11,hp:100,maxHp:100,speedMul:1,ammoBonus:0,armed:false,aim:-Math.PI/2,lastHit:-10,fireCd:0,ammo:0,flip:1,
   weapons:[],weapon:0,newWeapon:null,
   damageMul:1,fireMul:1,resist:1,regen:0,ammoInfinite:false,startAllWeapons:false,moonk:false };
@@ -285,6 +285,8 @@ let boss=null, bullets=[], globs=[], packets=[], parts=[], crates=[], gun=null;
 // MOONK cheat (type "moonk" or name yourself MOONK), difficulty, and post-win GOD LEVEL state.
 let cheatMoonk=false, cheatBuf="", banner=null;
 let god=false, glizzies=[], gremlins=[];
+let glizzler=null, greasePuddles=[];        // god-level final boss + grease hazards
+let combo=0, comboT=0, comboMul=1;           // kill-combo score multiplier
 let bestGod=parseInt(localStorage.getItem("hotdogNights.god")||"0",10);
 let nightTime=0, NIGHT_LEN=80, introTimer=0, crateTimer=0, shake=0;
 const SPEED=2.7;
@@ -336,7 +338,7 @@ function handleCharKey(e){ const k=e.key;
 const DIFFS = [
   {name:"Pussahh jit...",        sub:"BABY MODE - we won't tell anyone",  hpMul:0.55, dmgMul:0.45, spdMul:0.85, col:"#3ddc84"},
   {name:"Regular",               sub:"the way Frankie intended",          hpMul:1.0,  dmgMul:1.0,  spdMul:1.0,  col:"#34e7ff"},
-  {name:"Do you hate yourself?", sub:"DEMON MODE - good luck",            hpMul:1.7,  dmgMul:1.7,  spdMul:1.3,  col:"#ff3b3b"},
+  {name:"Do you hate yourself?", sub:"DEMON MODE - Frankie teleports from night 1", hpMul:2.05, dmgMul:1.95, spdMul:1.4, col:"#ff3b3b"},
 ];
 let diffSel = parseInt(localStorage.getItem("hotdogNights.diff")||"1",10);
 if(!(diffSel>=0&&diffSel<DIFFS.length)) diffSel=1;
@@ -366,7 +368,7 @@ applySettings();
 function cfg(n){ const d=curDiff(); return {
   speed: (1.15 + 0.2*(n-1))*d.spdMul,
   hp: Math.round((16 + (n-1)*13)*d.hpMul),
-  contact: (14 + 3*(n-1))*d.dmgMul,
+  contact: 14 + 3*(n-1),
   packets: n>=2, packetEvery: Math.max(3.2, 6-0.6*(n-1)), packetBurst: n>=4?3:2,
   shoot: n>=3, shootEvery: Math.max(2.2, 4.2-0.55*(n-1)), shootSpread: n>=5,
 }; }
@@ -380,16 +382,16 @@ const STORY = [
 const BEAT = {
   1:"Frankie lurches out of the dark. Get to the LASER TAG ARENA, grab the gun, and don't let him touch you.",
   2:"Now he flings crawling ketchup packets. Gun them down before they reach you.",
-  3:"Frankie spits ketchup globs across the park. Keep moving and dodge them.",
-  4:"Faster. Angrier. Packets AND globs at the same time. Stay sharp.",
-  5:"Final night. Everything he's got. End it.",
+  3:"Frankie spits ketchup globs AND learned to TELEPORT. Watch for the purple ring - that's where he slams down. Get clear.",
+  4:"Faster. Angrier. Packets, globs, and teleport slams all at once. Stay moving.",
+  5:"Final night. Everything he's got, blinking all over the park. End it.",
 };
 
 function beginRun(){ const ch=CHARS[charSel]||CHARS[0];
   player.maxHp=100+(ch.hpBonus||0); player.speedMul=ch.speedMul||1; player.ammoBonus=ch.ammoBonus||0;
   player.damageMul=1; player.fireMul=1; player.resist=1; player.regen=0;
   player.ammoInfinite=false; player.startAllWeapons=false; player.moonk=false;
-  god=false; glizzies=[]; gremlins=[];
+  god=false; glizzies=[]; gremlins=[]; glizzler=null; greasePuddles=[]; resetCombo();
   night=1; score=0; player.hp=player.maxHp; player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0;
   startNight(1); if(cheatMoonk) applyMoonkLoadout(); state="intro"; introTimer=2.6; }
 function unlockAllWeapons(label){ player.weapons=["pistol","smg","shotgun","plasma"]; player.weapon=3;
@@ -398,7 +400,7 @@ function grantFor(n){ const map={2:"smg",3:"shotgun",4:"plasma"}; const id=map[n
   if(!player.weapons.includes(id)){ player.weapons.push(id); player.weapon=player.weapons.length-1;
     player.newWeapon={name:WEAPONS[id].name, key:player.weapons.length}; } }
 function startNight(n){
-  god=false; glizzies=[]; gremlins=[];
+  god=false; glizzies=[]; gremlins=[]; glizzler=null; greasePuddles=[]; resetCombo();
   night=n; const c=cfg(n); buildMap();
   player.x=22*TS+TS/2; player.y=16*TS+TS/2; player.fireCd=0; player.newWeapon=null; player.lastHit=-10;
   if(n===1){ player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0; gun={x:36*TS+TS/2,y:7*TS+TS/2,t:0}; }
@@ -408,7 +410,8 @@ function startNight(n){
   if(cheatMoonk) applyMoonkLoadout();
   const p=farPoint();
   boss={ x:p.x,y:p.y,r:20,hp:c.hp,maxHP:c.hp,wobble:Math.random()*6,growlT:1,flip:1,
-         atkP:c.packetEvery*0.7, atkS:c.shootEvery, tele:0, enraged:false, hitFlash:0, dead:false };
+         atkP:c.packetEvery*0.7, atkS:c.shootEvery, tele:0, enraged:false, hitFlash:0, dead:false,
+         tpT:rand(4.5,7.5), tpWarn:0, tpTarget:null };
   bullets=[]; globs=[]; packets=[]; parts=[]; crates=[]; crateTimer=6; nightTime=0; shake=0;
 }
 function startOrAdvance(){ audioInit();
@@ -430,12 +433,38 @@ function burst(x,y,n,color,spd=4,life=0.5,size=3){ for(let i=0;i<n;i++){ const a
   parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life,max:life,color,size}); } }
 // All incoming damage funnels through here so difficulty + MOONK resistance always apply. Returns true if the hit was fatal.
 function hurtPlayer(amount, hitShake){
-  const dmg=Math.max(1, amount*(player.resist||1));
+  const dmg=Math.max(1, amount*curDiff().dmgMul*(player.resist||1));
   player.hp-=dmg; player.lastHit=nightTime; shake=Math.max(shake,hitShake); sfx.hurt();
   if(player.moonk) burst(player.x,player.y,10,"#34e7ff",5,0.25,2);
   if(player.hp<=0){ player.hp=0; gameOver(); return true; }
   return false;
 }
+function rand(a,b){ return a+Math.random()*(b-a); }
+// Kill-combo: chain kills before the timer lapses to multiply score.
+function addKill(base){ combo++; comboT=2.8; comboMul=Math.min(12, 1+Math.floor(combo/3)); score+=Math.round(base*comboMul); }
+function resetCombo(){ combo=0; comboT=0; comboMul=1; }
+// Pick a free spot at distance [minD,maxD] from the player for a teleport landing.
+function teleTarget(minD,maxD){
+  for(let i=0;i<80;i++){ const a=Math.random()*6.28, d=minD+Math.random()*(maxD-minD);
+    const x=player.x+Math.cos(a)*d, y=player.y+Math.sin(a)*d;
+    if(x>50&&x<WORLD_W-50&&y>50&&y<WORLD_H-50 && !collides(x,y,22)) return {x,y}; }
+  return {x:Math.max(50,Math.min(WORLD_W-50,player.x+rand(-90,90))), y:Math.max(50,Math.min(WORLD_H-50,player.y+rand(-90,90)))};
+}
+// Generic teleport-slam: warn (fade + ring at target) -> blink in -> slam AoE. Returns true if it killed the player.
+function stepTeleport(e, dt, opt){
+  if(e.tpWarn>0){ e.tpWarn-=dt;
+    if(e.tpWarn<=0){ e.x=e.tpTarget.x; e.y=e.tpTarget.y; e.flip=player.x<e.x?-1:1;
+      burst(e.x,e.y,30,"#b15cff",6,0.55,4); shake=Math.max(shake,0.55); sfx.zap();
+      if(Math.hypot(e.x-player.x,e.y-player.y) < e.r+player.r+(opt.slamR||14)){
+        if(hurtPlayer(opt.dmg,0.5)) return true;
+        const ka=Math.atan2(player.y-e.y,player.x-e.x); moveEntity(player,Math.cos(ka)*26,Math.sin(ka)*26); }
+      e.tpT=rand(opt.every[0],opt.every[1]); }
+    return false; }
+  e.tpT-=dt;
+  if(e.tpT<=0){ e.tpTarget=teleTarget(opt.range[0],opt.range[1]); e.tpWarn=opt.warn; }
+  return false;
+}
+function dropGrease(x,y){ if(greasePuddles.length<14) greasePuddles.push({x,y,r:rand(20,28),life:rand(3,4.2),max:4.2}); }
 function gameOver(){ state="over"; resetSticks(); sfx.lose(); if(!god && night>best){ best=night; localStorage.setItem("hotdogNights.best",String(best)); } }
 function confettiBurst(){ parts=[]; for(let i=0;i<90;i++) parts.push({x:Math.random()*WORLD_W,y:Math.random()*WORLD_H,vx:(Math.random()-0.5)*3,vy:(Math.random()-0.5)*3,life:2.4,max:2.4,color:["#ff3b3b","#34e7ff","#f4d03f","#fff"][i%4],size:4}); }
 function winGame(){ state="win"; resetSticks(); sfx.win(); if(5>best){ best=5; localStorage.setItem("hotdogNights.best","5"); }
@@ -445,7 +474,7 @@ function clearNight(){ score+=500; shake=0.6; resetSticks(); sfx.kill();
   if(night>=5) winGame();
   else { player.hp=Math.min(player.maxHp, player.hp+25); startNight(night+1); state="intro"; introTimer=2.8; } }
 //============================================================ GOD LEVEL (optional, post-win)
-const GOD_BEAT="The walk-in freezer bursts open. FIVE PHAT GLIZZYS roll out, dripping grease, spitting out PIGS IN A BLANKET - evil little gremlins that swarm. Drop all five. This is the real ending.";
+const GOD_BEAT="The walk-in freezer bursts open. FIVE PHAT GLIZZYS roll out - they teleport, spit grease globs, and hurl swarms of PIGS IN A BLANKET. Each one you drop makes the rest angrier. Clear all five... if that's really the end.";
 function buildGodMap(){
   for(let y=0;y<MH;y++) for(let x=0;x<MW;x++) solid[y][x]=false;
   for(let x=0;x<MW;x++){ solid[0][x]=true; solid[MH-1][x]=true; }
@@ -460,16 +489,24 @@ function startGodLevel(){
   if(cheatMoonk) applyMoonkLoadout();
   else { unlockAllWeapons("FULL ARSENAL"); player.ammo=AMMO_MAX; player.hp=player.maxHp; }
   boss=null; bullets=[]; globs=[]; packets=[]; parts=[]; crates=[]; gremlins=[]; crateTimer=5; nightTime=0; shake=0;
+  glizzler=null; greasePuddles=[]; resetCombo();
   glizzies=[];
-  const hp=Math.round(85*d.hpMul);
+  const hp=Math.round(95*d.hpMul);
   for(let k=0;k<5;k++){ let pt=freeWorldPoint();
     for(let tries=0;tries<200;tries++){ const c2=freeWorldPoint();
       if(Math.hypot(c2.x-player.x,c2.y-player.y)>260 && glizzies.every(g=>Math.hypot(g.x-c2.x,g.y-c2.y)>150)){ pt=c2; break; } }
     glizzies.push({ x:pt.x, y:pt.y, r:24, hp:hp, maxHP:hp,
-      wobble:Math.random()*6, flip:1, spawnT:1.5+Math.random()*2, globT:2+Math.random()*3, hitFlash:0, dead:false }); }
+      wobble:Math.random()*6, flip:1, spawnT:1.2+Math.random()*1.5, globT:2+Math.random()*3, hitFlash:0, dead:false,
+      tpT:rand(5,9), tpWarn:0, tpTarget:null }); }
   state="intro"; introTimer=3.2;
 }
-function godWin(){ state="godwin"; god=false; resetSticks(); sfx.win(); confettiBurst();
+// All 5 glizzies down -> the freezer's final form rises.
+function spawnGlizzler(){ const d=curDiff(); const hp=Math.round(560*d.hpMul); const p=teleTarget(180,260);
+  glizzler={ x:p.x, y:p.y, r:42, hp:hp, maxHP:hp, wobble:0, flip:1, hitFlash:0, dead:false,
+    tpT:rand(3.5,5.5), tpWarn:0, tpTarget:null, atkT:rand(1.4,2.4), pigT:rand(1.8,2.8) };
+  gremlins=[]; globs=[]; banner={t:2.8, big:"THE BIG GLIZZLER", small:"the freezer's final form. END IT."};
+  shake=0.9; sfx.growl(1); }
+function godWin(){ state="godwin"; god=false; glizzler=null; resetSticks(); sfx.win(); confettiBurst();
   const won=Math.max(bestGod, diffSel+1); bestGod=won; localStorage.setItem("hotdogNights.god",String(won)); }
 function fireGlobs(c,enr){ const base=Math.atan2(player.y-boss.y, player.x-boss.x);
   const angs = c.shootSpread ? [base-0.28,base,base+0.28] : [base]; const spd=3.4*(enr?1.25:1);
@@ -524,20 +561,27 @@ function update(dt){
       if(b.pierce>0) b.pierce--; else b.life=0;
       if(boss.hp<=0 && !boss.dead){ boss.dead=true; clearNight(); return; } }
     if(b.life<=0) continue;
-    if(god){ for(const gz of glizzies){ if(gz.dead) continue;
+    if(god){
+      if(glizzler && !glizzler.dead && Math.hypot(glizzler.x-b.x,glizzler.y-b.y)<glizzler.r){
+        glizzler.hp-=b.dmg; glizzler.hitFlash=0.09; sfx.bosshit(); burst(b.x,b.y,4,"#fff",3,0.2,2);
+        if(glizzler.hp<=0){ glizzler.dead=true; shake=1.0; sfx.kill(); addKill(3000);
+          burst(glizzler.x,glizzler.y,90,"#ff7b00",8,1.2,6); burst(glizzler.x,glizzler.y,40,"#f4d03f",7,1.0,5); godWin(); return; }
+        if(b.pierce>0) b.pierce--; else b.life=0; }
+      if(b.life<=0) continue;
+      for(const gz of glizzies){ if(gz.dead) continue;
       if(Math.hypot(gz.x-b.x,gz.y-b.y)<gz.r){ gz.hp-=b.dmg; gz.hitFlash=0.09; sfx.bosshit(); burst(b.x,b.y,4,"#fff",3,0.2,2);
-        if(gz.hp<=0){ gz.dead=true; score+=750; shake=0.5; sfx.kill();
+        if(gz.hp<=0){ gz.dead=true; shake=0.5; sfx.kill(); addKill(750);
           burst(gz.x,gz.y,50,"#ff7b00",7,0.9,5); burst(gz.x,gz.y,24,"#f4d03f",6,0.8,4);
-          if(glizzies.every(g=>g.dead)){ godWin(); return; } }
+          if(glizzies.every(g=>g.dead)){ spawnGlizzler(); return; } }
         if(b.pierce>0) b.pierce--; else b.life=0; break; } }
       if(b.life<=0) continue;
       for(const gm of gremlins){ if(gm.dead) continue;
-        if(Math.hypot(gm.x-b.x,gm.y-b.y)<gm.r+2){ gm.dead=true; score+=20; burst(gm.x,gm.y,8,"#f4d03f",4,0.3,2); sfx.pop();
+        if(Math.hypot(gm.x-b.x,gm.y-b.y)<gm.r+2){ gm.dead=true; addKill(20); burst(gm.x,gm.y,8,"#f4d03f",4,0.3,2); sfx.pop();
           if(b.pierce>0) b.pierce--; else b.life=0; break; } }
     }
     if(b.life<=0) continue;
     for(const pk of packets){ if(pk.dead) continue;
-      if(Math.hypot(pk.x-b.x,pk.y-b.y)<pk.r+2){ pk.dead=true; score+=15; burst(pk.x,pk.y,8,"#c0392b",4,0.3,2); sfx.pop();
+      if(Math.hypot(pk.x-b.x,pk.y-b.y)<pk.r+2){ pk.dead=true; addKill(15); burst(pk.x,pk.y,8,"#c0392b",4,0.3,2); sfx.pop();
         if(b.pierce>0) b.pierce--; else b.life=0; break; } }
     if(b.life>0){ b.x+=b.vx*f; b.y+=b.vy*f; }
   }
@@ -545,26 +589,32 @@ function update(dt){
 
   // boss
   if(!god && boss && !boss.dead){
-    const c=cfg(night); boss.hitFlash=Math.max(0,boss.hitFlash-dt); boss.wobble+=dt*8;
+    const c=cfg(night); const demon=diffSel===2; boss.hitFlash=Math.max(0,boss.hitFlash-dt); boss.wobble+=dt*8;
     if(nightTime>=NIGHT_LEN && !boss.enraged){ boss.enraged=true; sfx.growl(1); shake=0.4; }
     const enr=boss.enraged;
     boss.growlT-=dt;
     if(boss.growlT<=0){ const d=Math.hypot(boss.x-player.x,boss.y-player.y);
       const v=Math.max(0.12,0.7*(1-d/460)); sfx.growl(enr?Math.min(1,v+0.2):v); boss.growlT=(enr?1.0:1.7)+Math.random(); }
-    const ang=Math.atan2(player.y-boss.y, player.x-boss.x);
-    const sp=c.speed*(enr?1.3:1)*(boss.tele>0?0.3:1)*f, bob=Math.sin(boss.wobble)*0.4*f;
-    boss.flip=Math.cos(ang)<0?-1:1;
-    moveEntity(boss, Math.cos(ang)*sp, Math.sin(ang)*sp+bob);
-    if(Math.hypot(boss.x-player.x,boss.y-player.y)<boss.r+player.r){
-      if(nightTime-player.lastHit>0.8){ if(hurtPlayer(c.contact,0.4)) return;
-        burst(player.x,player.y,10,"#ff2d2d",4,0.4,3);
-        const ka=Math.atan2(player.y-boss.y,player.x-boss.x); moveEntity(player,Math.cos(ka)*24,Math.sin(ka)*24); } }
-    if(c.packets){ boss.atkP-=dt; if(boss.atkP<=0){ const n=c.packetBurst+(enr?1:0);
-      for(let i=0;i<n && packets.length<10;i++){ const a=Math.random()*6.28, d=24+Math.random()*16;
-        packets.push({x:boss.x+Math.cos(a)*d,y:boss.y+Math.sin(a)*d,r:9,dead:false,wob:Math.random()*6}); }
-      sfx.pop(); boss.atkP=c.packetEvery*(enr?0.6:1); } }
-    if(c.shoot){ if(boss.tele>0){ boss.tele-=dt; if(boss.tele<=0){ fireGlobs(c,enr); boss.atkS=c.shootEvery*(enr?0.6:1); } }
-      else { boss.atkS-=dt; if(boss.atkS<=0) boss.tele=0.6; } }
+    // teleport-slam: hard nights (>=3) or ANY Demon night. Fair purple-ring telegraph, then a blink-in slam.
+    if(night>=3 || demon){ const m=enr?0.7:1,
+      lo=Math.max(2.6,(demon?4:5.5)-0.3*(night-3))*m, hi=Math.max(4.2,(demon?6.5:9)-0.4*(night-3))*m;
+      if(stepTeleport(boss,dt,{every:[lo,hi],warn:0.85,range:[70,150],dmg:Math.min(34,c.contact*1.3),slamR:16})) return; }
+    if(boss.tpWarn<=0){
+      const ang=Math.atan2(player.y-boss.y, player.x-boss.x);
+      const sp=c.speed*(enr?1.3:1)*(boss.tele>0?0.3:1)*f, bob=Math.sin(boss.wobble)*0.4*f;
+      boss.flip=Math.cos(ang)<0?-1:1;
+      moveEntity(boss, Math.cos(ang)*sp, Math.sin(ang)*sp+bob);
+      if(Math.hypot(boss.x-player.x,boss.y-player.y)<boss.r+player.r){
+        if(nightTime-player.lastHit>0.8){ if(hurtPlayer(c.contact,0.4)) return;
+          burst(player.x,player.y,10,"#ff2d2d",4,0.4,3);
+          const ka=Math.atan2(player.y-boss.y,player.x-boss.x); moveEntity(player,Math.cos(ka)*24,Math.sin(ka)*24); } }
+      if(c.packets){ boss.atkP-=dt; if(boss.atkP<=0){ const n=c.packetBurst+(enr?1:0)+(demon?1:0);
+        for(let i=0;i<n && packets.length<14;i++){ const a=Math.random()*6.28, d=24+Math.random()*16;
+          packets.push({x:boss.x+Math.cos(a)*d,y:boss.y+Math.sin(a)*d,r:9,dead:false,wob:Math.random()*6}); }
+        sfx.pop(); boss.atkP=c.packetEvery*(enr?0.6:1)*(demon?0.75:1); } }
+      if(c.shoot){ if(boss.tele>0){ boss.tele-=dt; if(boss.tele<=0){ fireGlobs(c,enr); boss.atkS=c.shootEvery*(enr?0.6:1)*(demon?0.75:1); } }
+        else { boss.atkS-=dt; if(boss.atkS<=0) boss.tele=0.6; } }
+    }
   }
 
   // ketchup globs
@@ -590,34 +640,61 @@ function update(dt){
     for(let i=crates.length-1;i>=0;i--){ const cr=crates[i];
       if(Math.hypot(cr.x-player.x,cr.y-player.y)<26){ player.ammo=Math.min(AMMO_MAX,player.ammo+CRATE_AMMO); crates.splice(i,1); sfx.ammo(); burst(player.x,player.y,12,"#f4d03f",4,0.4,3); } } }
 
-  // particles + clock
+  // particles + clock + combo decay
   for(const p of parts){ p.x+=p.vx*f; p.y+=p.vy*f; p.vx*=0.92; p.vy*=0.92; p.life-=dt; }
   parts=parts.filter(p=>p.life>0);
+  if(comboT>0){ comboT-=dt; if(comboT<=0) resetCombo(); }
   nightTime+=dt;
 }
 // Returns true if a fatal hit ended the run (caller must early-return).
 function updateGod(dt,f){
   const d=curDiff();
+  const aliveN=glizzies.filter(g=>!g.dead).length;
+  const rage=1+(5-aliveN)*0.16;   // survivors get angrier as their siblings fall
   for(const gz of glizzies){ if(gz.dead) continue; gz.hitFlash=Math.max(0,gz.hitFlash-dt); gz.wobble+=dt*7;
-    const ang=Math.atan2(player.y-gz.y, player.x-gz.x), sp=0.85*d.spdMul*f, bob=Math.sin(gz.wobble)*0.4*f;
+    if(stepTeleport(gz,dt,{every:[6,10],warn:1.0,range:[80,170],dmg:18,slamR:16})) return true;
+    if(gz.tpWarn>0) continue;
+    const ang=Math.atan2(player.y-gz.y, player.x-gz.x), sp=0.85*d.spdMul*rage*f, bob=Math.sin(gz.wobble)*0.4*f;
     gz.flip=Math.cos(ang)<0?-1:1; moveEntity(gz, Math.cos(ang)*sp, Math.sin(ang)*sp+bob);
     if(Math.hypot(gz.x-player.x,gz.y-player.y)<gz.r+player.r){
       if(nightTime-player.lastHit>0.8){ if(hurtPlayer(16,0.45)) return true;
         burst(player.x,player.y,10,"#ff7b00",4,0.4,3);
         const ka=Math.atan2(player.y-gz.y,player.x-gz.x); moveEntity(player,Math.cos(ka)*22,Math.sin(ka)*22); } }
-    gz.spawnT-=dt; if(gz.spawnT<=0 && gremlins.length<26){ const n=1+(Math.random()<0.5?1:0);
+    gz.spawnT-=dt; if(gz.spawnT<=0 && gremlins.length<40){ const n=2+(Math.random()<0.6?1:0);
       for(let i=0;i<n;i++){ const a=Math.random()*6.28, dd=20+Math.random()*14;
         gremlins.push({x:gz.x+Math.cos(a)*dd,y:gz.y+Math.sin(a)*dd,r:8,dead:false,wob:Math.random()*6}); }
-      sfx.pop(); gz.spawnT=2.6+Math.random()*2; }
-    gz.globT-=dt; if(gz.globT<=0){ const a=Math.atan2(player.y-gz.y,player.x-gz.x), spd=3.6;
-      globs.push({x:gz.x+Math.cos(a)*22,y:gz.y+Math.sin(a)*22,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,life:2.6,r:9,dmg:12}); sfx.splat();
-      gz.globT=3+Math.random()*3; } }
-  for(const gm of gremlins){ if(gm.dead) continue; gm.wob+=dt*12;
-    const a=Math.atan2(player.y-gm.y,player.x-gm.x), sp=2.0*d.spdMul*f;
+      sfx.pop(); gz.spawnT=(1.6+Math.random()*1.4)/rage; }
+    gz.globT-=dt; if(gz.globT<=0){ const base=Math.atan2(player.y-gz.y,player.x-gz.x), spd=3.6*rage;
+      const spread=aliveN<=3?[-0.22,0,0.22]:[0];
+      spread.forEach(o=>{ const a=base+o; globs.push({x:gz.x+Math.cos(a)*22,y:gz.y+Math.sin(a)*22,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,life:2.6,r:9,dmg:12}); });
+      sfx.splat(); gz.globT=(2.6+Math.random()*2.5)/rage; } }
+  // THE BIG GLIZZLER - final form
+  if(glizzler && !glizzler.dead){ const gl=glizzler; gl.hitFlash=Math.max(0,gl.hitFlash-dt); gl.wobble+=dt*6;
+    if(stepTeleport(gl,dt,{every:[3.5,5.5],warn:0.9,range:[90,170],dmg:26,slamR:22})) return true;
+    if(gl.tpWarn<=0){
+      const ang=Math.atan2(player.y-gl.y,player.x-gl.x), sp=1.05*d.spdMul*f, bob=Math.sin(gl.wobble)*0.4*f;
+      gl.flip=Math.cos(ang)<0?-1:1; moveEntity(gl, Math.cos(ang)*sp, Math.sin(ang)*sp+bob);
+      if(Math.hypot(gl.x-player.x,gl.y-player.y)<gl.r+player.r){ if(nightTime-player.lastHit>0.7){ if(hurtPlayer(24,0.55)) return true;
+        burst(player.x,player.y,12,"#ff7b00",4,0.5,3); const ka=Math.atan2(player.y-gl.y,player.x-gl.x); moveEntity(player,Math.cos(ka)*28,Math.sin(ka)*28); } }
+      gl.atkT-=dt; if(gl.atkT<=0){ const base=Math.atan2(player.y-gl.y,player.x-gl.x), N=10, spd=3.4;
+        for(let i=0;i<N;i++){ const a=base+i*(6.283/N); globs.push({x:gl.x+Math.cos(a)*32,y:gl.y+Math.sin(a)*32,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,life:3,r:9,dmg:13}); }
+        sfx.splat(); dropGrease(gl.x,gl.y); gl.atkT=rand(2.6,3.6); }
+      gl.pigT-=dt; if(gl.pigT<=0 && gremlins.length<46){ for(let i=0;i<4;i++){ const a=Math.random()*6.28, dd=26+Math.random()*18;
+        gremlins.push({x:gl.x+Math.cos(a)*dd,y:gl.y+Math.sin(a)*dd,r:8,dead:false,wob:Math.random()*6}); } sfx.pop(); gl.pigT=rand(2.2,3.2); } } }
+  // pigs in a blanket - faster, lunge when close
+  for(const gm of gremlins){ if(gm.dead) continue; gm.wob+=dt*14;
+    const dxp=player.x-gm.x, dyp=player.y-gm.y, dist=Math.hypot(dxp,dyp), lunge=dist<100?1.55:1;
+    const a=Math.atan2(dyp,dxp), sp=3.1*d.spdMul*lunge*f;
     moveEntity(gm, Math.cos(a)*sp, Math.sin(a)*sp);
-    if(Math.hypot(gm.x-player.x,gm.y-player.y)<player.r+gm.r){ gm.dead=true; sfx.pop(); if(hurtPlayer(7,0.2)) return true;
+    if(dist<player.r+gm.r){ gm.dead=true; sfx.pop(); if(hurtPlayer(9,0.22)) return true;
       burst(player.x,player.y,8,"#f4d03f",3,0.4,2); } }
   gremlins=gremlins.filter(g=>!g.dead);
+  // grease puddles - lingering damage-over-time
+  for(const gp of greasePuddles){ gp.life-=dt;
+    if(Math.hypot(gp.x-player.x,gp.y-player.y)<gp.r+player.r){ player.hp-=7*d.dmgMul*(player.resist||1)*dt; player.lastHit=nightTime;
+      if(Math.random()<0.25) burst(player.x,player.y,2,"#6a4a00",2,0.3,2);
+      if(player.hp<=0){ player.hp=0; gameOver(); return true; } } }
+  greasePuddles=greasePuddles.filter(g=>g.life>0);
   return false;
 }
 
@@ -627,6 +704,10 @@ function updateCamera(){ let sx=0,sy=0; if(shake>0&&shakeMul){ sx=(Math.random()
   camX=Math.max(0,Math.min(WORLD_W-W,player.x-W/2))+sx; camY=Math.max(0,Math.min(WORLD_H-H,player.y-H/2))+sy; }
 
 //============================================================ RENDER
+function teleWarnRing(e){ if(!e||e.tpWarn<=0||!e.tpTarget) return; const x=e.tpTarget.x-camX,y=e.tpTarget.y-camY, p=1-Math.max(0,Math.min(1,e.tpWarn));
+  ctx.save(); ctx.globalCompositeOperation="lighter"; glow(x,y,40,"rgba(177,92,255,0.45)");
+  ctx.strokeStyle="rgba(205,130,255,0.9)"; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(x,y,10+p*32,0,7); ctx.stroke();
+  ctx.strokeStyle="rgba(255,255,255,0.45)"; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(x,y,34,0,7); ctx.stroke(); ctx.restore(); }
 function render(){
   ctx.fillStyle="#05050b"; ctx.fillRect(0,0,W,H); updateCamera();
   const tx0=Math.floor(camX/TS),ty0=Math.floor(camY/TS),tx1=Math.ceil((camX+W)/TS),ty1=Math.ceil((camY+H)/TS);
@@ -644,6 +725,9 @@ function render(){
   if(!god) for(const z of ZONES){ const lx=(z.x+z.w/2)*TS-camX, ly=z.y*TS-camY+16;
     if(lx>-80&&lx<W+80&&ly>-20&&ly<H+20){ ctx.fillStyle=z.lab; ctx.globalAlpha=0.55; ctx.fillText(z.name,lx,ly); ctx.globalAlpha=1; } }
 
+  for(const gp of greasePuddles){ const x=gp.x-camX, y=gp.y-camY, a=Math.min(0.55, gp.life/gp.max*0.55);
+    ctx.save(); ctx.globalAlpha=a; ctx.fillStyle="#160c00"; ctx.beginPath(); ctx.ellipse(x,y,gp.r,gp.r*0.62,0,0,7); ctx.fill();
+    ctx.fillStyle="#3a2800"; ctx.beginPath(); ctx.ellipse(x,y,gp.r*0.66,gp.r*0.4,0,0,7); ctx.fill(); ctx.restore(); }
   for(const cr of crates) drawSprite(SP_CRATE, cr.x-camX, cr.y-camY, 4);
   if(gun){ const bob=Math.sin(gun.t*4)*4; drawSprite(SP_GUN, gun.x-camX, gun.y-camY-bob, 4); }
 
@@ -659,15 +743,21 @@ function render(){
 
   // boss
   if(boss && !boss.dead){ const bx=boss.x-camX, by=boss.y-camY;
-    drawSprite(SP_HOTDOG, bx, by, BS, boss.flip);
-    if(boss.hitFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,boss.hitFlash*6); ctx.fillStyle="#fff"; ctx.fillRect(bx-22,by-36,44,72); ctx.restore(); } }
+    ctx.save(); if(boss.tpWarn>0) ctx.globalAlpha=0.3; drawSprite(SP_HOTDOG, bx, by, BS, boss.flip); ctx.restore();
+    if(boss.hitFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,boss.hitFlash*6); ctx.fillStyle="#fff"; ctx.fillRect(bx-22,by-36,44,72); ctx.restore(); }
+    teleWarnRing(boss); }
 
-  // PHAT GLIZZYS + pigs in a blanket
+  // PHAT GLIZZYS + pigs in a blanket + the BIG GLIZZLER
   if(god){
     for(const gm of gremlins){ if(gm.dead) continue; drawSprite(SP_PIG, gm.x-camX, gm.y-camY+Math.sin(gm.wob)*2, 3, 1); }
     for(const gz of glizzies){ if(gz.dead) continue; const gx=gz.x-camX, gy=gz.y-camY;
-      drawSprite(SP_HOTDOG, gx, gy, BS+1, gz.flip, GLIZZY_OV);
-      if(gz.hitFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,gz.hitFlash*6); ctx.fillStyle="#fff"; ctx.fillRect(gx-26,gy-44,52,84); ctx.restore(); } }
+      ctx.save(); if(gz.tpWarn>0) ctx.globalAlpha=0.3; drawSprite(SP_HOTDOG, gx, gy, BS+1, gz.flip, GLIZZY_OV); ctx.restore();
+      if(gz.hitFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,gz.hitFlash*6); ctx.fillStyle="#fff"; ctx.fillRect(gx-26,gy-44,52,84); ctx.restore(); }
+      teleWarnRing(gz); }
+    if(glizzler && !glizzler.dead){ const gx=glizzler.x-camX, gy=glizzler.y-camY;
+      ctx.save(); if(glizzler.tpWarn>0) ctx.globalAlpha=0.32; drawSprite(SP_HOTDOG, gx, gy, BS+3, glizzler.flip, GLIZZY_OV); ctx.restore();
+      if(glizzler.hitFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,glizzler.hitFlash*6); ctx.fillStyle="#fff"; ctx.fillRect(gx-40,gy-70,80,132); ctx.restore(); }
+      teleWarnRing(glizzler); }
   }
 
   // player
@@ -702,10 +792,14 @@ function render(){
     ctx.fillStyle="#ff2a2a"; ctx.fillRect(bx-13,ey-2,6,6); ctx.fillRect(bx+7,ey-2,6,6); }
   for(const g of globs) glow(g.x-camX, g.y-camY, 18, "rgba(255,40,40,0.7)");
   for(const pk of packets){ if(!pk.dead) glow(pk.x-camX, pk.y-camY, 16, "rgba(210,50,50,0.4)"); }
-  if(god){ for(const gz of glizzies){ if(gz.dead) continue; const gx=gz.x-camX, gy=gz.y-camY;
+  if(god){ for(const gp of greasePuddles) glow(gp.x-camX, gp.y-camY, 22, "rgba(120,80,10,0.30)");
+    for(const gz of glizzies){ if(gz.dead) continue; const gx=gz.x-camX, gy=gz.y-camY;
       glow(gx,gy-10,64,"rgba(255,140,30,0.5)"); glow(gx,gy-BS*4,26,"rgba(255,80,20,0.6)");
       ctx.fillStyle="#fff2cf"; ctx.fillRect(gx-14,gy-BS*4-2,6,6); ctx.fillRect(gx+8,gy-BS*4-2,6,6); }
-    for(const gm of gremlins){ if(!gm.dead) glow(gm.x-camX, gm.y-camY, 15, "rgba(244,180,40,0.45)"); } }
+    for(const gm of gremlins){ if(!gm.dead) glow(gm.x-camX, gm.y-camY, 15, "rgba(244,180,40,0.45)"); }
+    if(glizzler && !glizzler.dead){ const gx=glizzler.x-camX, gy=glizzler.y-camY;
+      glow(gx,gy-10,96,"rgba(255,120,20,0.55)"); glow(gx,gy-BS*5,34,"rgba(255,60,10,0.7)");
+      ctx.fillStyle="#fff2cf"; ctx.fillRect(gx-18,gy-BS*5-2,8,8); ctx.fillRect(gx+10,gy-BS*5-2,8,8); } }
   if(gun) glow(gun.x-camX, gun.y-camY, 60, "rgba(52,231,255,0.55)");
   for(const cr of crates) glow(cr.x-camX, cr.y-camY, 30, "rgba(244,208,63,0.5)");
   for(const b of bullets){ const bx=b.x-camX,by=b.y-camY; ctx.fillStyle="#fff"; ctx.fillRect(bx-2,by-2,4,4); glow(bx,by,10,b.color); }
@@ -771,10 +865,20 @@ function drawHUD(){
     ctx.strokeStyle="#000"; ctx.lineWidth=1; ctx.strokeRect(bx,byy,bw,12);
     ctx.fillStyle="#fff"; ctx.font="bold 11px Trebuchet MS"; ctx.textAlign="center";
     ctx.fillText("FRANKIE THE HOTDOG"+(boss.enraged?"  -  ENRAGED!":""), W/2, byy+10.5); }
-  // god-level glizzy counter
-  if(god && player.armed){ const left=glizzies.filter(g=>!g.dead).length;
-    ctx.textAlign="center"; ctx.fillStyle="#ff7b00"; ctx.font="bold 16px Trebuchet MS";
-    ctx.fillText("PHAT GLIZZYS LEFT: "+left+" / "+glizzies.length, W/2, 58); }
+  // god-level: glizzy counter, or the BIG GLIZZLER health bar
+  if(god && player.armed){
+    if(glizzler && !glizzler.dead){ const bw=460, bx=W/2-bw/2, byy=46;
+      ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fillRect(bx-2,byy-2,bw+4,18);
+      ctx.fillStyle="#2a1400"; ctx.fillRect(bx,byy,bw,14);
+      ctx.fillStyle="#ff7b00"; ctx.fillRect(bx,byy,bw*Math.max(0,glizzler.hp/glizzler.maxHP),14);
+      ctx.strokeStyle="#000"; ctx.lineWidth=1; ctx.strokeRect(bx,byy,bw,14);
+      ctx.fillStyle="#fff"; ctx.font="bold 12px Trebuchet MS"; ctx.textAlign="center"; ctx.fillText("THE BIG GLIZZLER", W/2, byy+11); }
+    else { const left=glizzies.filter(g=>!g.dead).length;
+      ctx.textAlign="center"; ctx.fillStyle="#ff7b00"; ctx.font="bold 16px Trebuchet MS";
+      ctx.fillText("PHAT GLIZZYS LEFT: "+left+" / "+glizzies.length, W/2, 58); } }
+  // kill-combo meter
+  if(combo>2 && player.armed){ ctx.textAlign="center"; ctx.fillStyle=comboMul>=5?"#ff7b00":"#f4d03f"; ctx.font="bold 15px Trebuchet MS";
+    ctx.fillText("x"+comboMul+"  COMBO", W/2, god?78:72); }
   // hp
   ctx.textAlign="left"; ctx.fillStyle="#1a1a2e"; ctx.fillRect(16,H-34,200,18);
   const ratio=Math.max(0,player.hp/player.maxHp), hpc=ratio>0.5?"#3ddc84":ratio>0.25?"#f4d03f":"#ff3b3b";
