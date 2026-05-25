@@ -1,0 +1,9 @@
+{
+  "name": "hotdog-nights-coop-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Relay server for Hotdog Nights co-op (host-authoritative).",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "ws": "^8.18.0" }
+}
