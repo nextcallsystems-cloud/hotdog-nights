@@ -102,7 +102,11 @@ cv.addEventListener("mousedown", e => { audioInit();
   if (state==="settings"){ const p=canvasPos(e);   // secret "?" : tap shows hint, triple-tap opens console
     if (qHot && p.x>=qHot.x && p.x<=qHot.x+qHot.w && p.y>=qHot.y && p.y<=qHot.y+qHot.h){ showQHint(); if(tripleTap("q")) openCheatConsole(); }
     return; }
-  if (state==="play"){ firing = true; usingMouse = true; } else startOrAdvance(); });
+  if (state==="play"){ firing = true; usingMouse = true; return; }
+  // menu screens: honor an on-screen button under the cursor (mouse uses the same buttons as touch)
+  const mb = hitBtn(uiButtons, canvasPos(e)); if(mb){ mb.fn(); return; }
+  if (state==="win") return;          // win screen: only GOD LEVEL / TITLE act - no stray-click bounce to title
+  startOrAdvance(); });
 addEventListener("mouseup", () => firing = false);
 cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { if (state==="play" && player.weapons.length>1){ e.preventDefault();
@@ -127,7 +131,8 @@ function stickSet(s,p){ const dx=p.x-s.ox, dy=p.y-s.oy, mag=Math.hypot(dx,dy), R
   if(mag>D){ s.vx=dx/mag; s.vy=dy/mag; s.ang=Math.atan2(dy,dx); } else { s.vx=0; s.vy=0; }
   s.kx = s.ox + (mag>R?dx/mag*R:dx); s.ky = s.oy + (mag>R?dy/mag*R:dy); }
 function resetSticks(){ touchMove.active=false; touchMove.vx=touchMove.vy=touchMove.mag=0;
-  touchAim.active=false; touchAim.mag=0; firing=false; }
+  touchAim.active=false; touchAim.mag=0; firing=false;
+  for(const k in keys) keys[k]=false; }   // also drop held movement/fire keys across hard transitions
 function handleTouchStart(id,p){
   if(state==="play"){ const b=hitBtn(hudButtons,p); if(b){ b.fn(); return; }
     if(p.x<W*0.5 && !touchMove.active){ Object.assign(touchMove,{id,ox:p.x,oy:p.y,kx:p.x,ky:p.y,vx:0,vy:0,mag:0,active:true}); }
@@ -325,7 +330,7 @@ function farPoint(){ let p; for(let i=0;i<60;i++){ p=freeWorldPoint(); if(Math.h
 let state="title", night=1, score=0, storyPage=0;
 let best=parseInt(localStorage.getItem("hotdogNights.best")||"0",10);
 let playerName=localStorage.getItem("hotdogNights.name")||"";
-const VERSION="v13";
+const VERSION="v14";
 const player={ x:0,y:0,r:11,hp:100,maxHp:100,speedMul:1,ammoBonus:0,armed:false,aim:-Math.PI/2,lastHit:-10,fireCd:0,ammo:0,flip:1,
   weapons:[],weapon:0,newWeapon:null,gatSpin:0,jumpCd:0,
   damageMul:1,fireMul:1,resist:1,regen:0,ammoInfinite:false,startAllWeapons:false,moonk:false };
@@ -998,6 +1003,7 @@ function render(){
   cv.style.cursor = (state==="play"||state==="pause") ? "none" : "default";
   drawHUD();
   if(isTouch && !usingMouse && state==="play") drawTouchSticks();
+  uiButtons.length=0;   // clear stale menu buttons; each screen below rebuilds its own (fixes cross-screen ghost taps)
   if(state==="title") drawTitle();
   if(state==="name") drawName();
   if(state==="charselect") drawCharSelect();
@@ -1180,10 +1186,12 @@ function drawWin(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
   wrap("Frankie collapses into a steaming pile of relish and regret. The park is yours again - and you'll smell like mustard for the rest of your life.",640).forEach((ln,i)=>ctx.fillText(ln,W/2,H/2-54+i*24));
   ctx.fillStyle="#f4d03f"; ctx.font="bold 20px Trebuchet MS"; ctx.fillText((playerName?playerName.toUpperCase()+" SURVIVED ALL 5 NIGHTS":"YOU SURVIVED ALL 5 NIGHTS")+"  -  Score: "+score, W/2, H/2+10);
   ctx.fillStyle="#ff7b00"; ctx.font="bold 24px Trebuchet MS"; ctx.fillText("...but the freezer is rumbling.", W/2, H/2+52);
-  if(isTouch){ pushBtn(uiButtons, W/2-200, H/2+74, 190, 46, "GOD LEVEL", ()=>startGodLevel());
-    pushBtn(uiButtons, W/2+10, H/2+74, 190, 46, "TITLE", ()=>{ state="title"; }); uiButtons.forEach(drawBtn); }
-  else { ctx.fillStyle="#ff7b00"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  press G for the GOD LEVEL  <", W/2, H/2+88);
-    ctx.fillStyle="#5a5a7a"; ctx.font="14px Trebuchet MS"; ctx.fillText("5 PHAT GLIZZYS. they spit pigs in a blanket. ENTER for title instead.", W/2, H/2+116); } }
+  // GOD LEVEL / TITLE buttons - clickable for mouse AND touch; G / ENTER also work on keyboard
+  pushBtn(uiButtons, W/2-200, H/2+78, 190, 46, "GOD LEVEL", ()=>startGodLevel());
+  pushBtn(uiButtons, W/2+10, H/2+78, 190, 46, "TITLE", ()=>{ state="title"; });
+  uiButtons.forEach(drawBtn);
+  if(!isTouch){ ctx.fillStyle="#5a5a7a"; ctx.font="13px Trebuchet MS";
+    ctx.fillText("click GOD LEVEL or press G    -    click TITLE or press ENTER", W/2, H/2+142); } }
 function drawGodWin(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
   for(const p of parts){ ctx.globalAlpha=Math.max(0,p.life/p.max); ctx.fillStyle=p.color; ctx.fillRect(p.x-camX-p.size/2,p.y-camY-p.size/2,p.size,p.size); } ctx.globalAlpha=1;
   ctx.fillStyle="#ff7b00"; ctx.font="bold 46px Trebuchet MS"; ctx.fillText("GOD LEVEL CLEARED", W/2, H/2-70);
