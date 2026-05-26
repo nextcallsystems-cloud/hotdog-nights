@@ -94,8 +94,7 @@ function handleNameKey(e){
   if (e.key === "Backspace"){ playerName = playerName.slice(0,-1); e.preventDefault(); return; }
   if (e.key.length === 1 && /[A-Za-z0-9 _!\-]/.test(e.key) && playerName.length < 14){ playerName += e.key; e.preventDefault(); }
 }
-addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false;
-  if (["4","5","6"].includes(e.key)) numDown[e.key] = false; });
+addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 function canvasPos(e){ const r = cv.getBoundingClientRect();
   return { x:(e.clientX-r.left)*(W/r.width), y:(e.clientY-r.top)*(H/r.height) }; }
 cv.addEventListener("mousemove", e => { const p = canvasPos(e); mouseX = p.x; mouseY = p.y; });
@@ -155,7 +154,7 @@ function syncNameInput(){ if(!isTouch||!nm) return;
   else if(state!=="name" && nmShown){ nm.style.display="none"; nm.blur(); nmShown=false; } }
 // Cheat-code console (Options: 4+5+6, or triple-tap the secret "?"). Works for keyboard + touch.
 const cc = document.getElementById("cc");
-function openCheatConsole(){ if(cheatConsoleOpen) return; cheatConsoleOpen=true; numDown={};
+function openCheatConsole(){ if(cheatConsoleOpen) return; cheatConsoleOpen=true; chordBuf="";
   if(cc){ cc.value=""; cc.style.display="block"; setTimeout(()=>cc.focus(),0); } audioInit(); sfx.pop(); }
 function closeCheatConsole(){ cheatConsoleOpen=false; if(cc){ cc.style.display="none"; cc.blur(); } }
 function submitCheatConsole(){ const code=(cc?cc.value:"").trim().toUpperCase(); closeCheatConsole();
@@ -323,7 +322,7 @@ function farPoint(){ let p; for(let i=0;i<60;i++){ p=freeWorldPoint(); if(Math.h
 let state="title", night=1, score=0, storyPage=0;
 let best=parseInt(localStorage.getItem("hotdogNights.best")||"0",10);
 let playerName=localStorage.getItem("hotdogNights.name")||"";
-const VERSION="v11";
+const VERSION="v12";
 const player={ x:0,y:0,r:11,hp:100,maxHp:100,speedMul:1,ammoBonus:0,armed:false,aim:-Math.PI/2,lastHit:-10,fireCd:0,ammo:0,flip:1,
   weapons:[],weapon:0,newWeapon:null,gatSpin:0,jumpCd:0,
   damageMul:1,fireMul:1,resist:1,regen:0,ammoInfinite:false,startAllWeapons:false,moonk:false };
@@ -333,7 +332,7 @@ let friends=[], minionCd=0;                  // MINIONS cheat: friendly goons th
 // MOONK cheat (type "moonk" or name yourself MOONK), difficulty, and post-win GOD LEVEL state.
 let cheatMoonk=false, cheatBuf="", banner=null;
 const cheats={jump:false, doctor:false};     // unlockable cheats (JUMP dash, DOCTOR fast-heal)
-let cheatConsoleOpen=false, numDown={}, muteSeq=false;  // Options cheat-console + 4+5+6 chord + mute-restore
+let cheatConsoleOpen=false, chordBuf="", muteSeq=false;  // Options cheat-console + "456" code buffer + mute-restore
 let qHot=null;                               // secret "?" hotspot rect in Options
 let god=false, glizzies=[], gremlins=[];
 let glizzler=null, greasePuddles=[];        // god-level final boss + grease hazards
@@ -364,12 +363,12 @@ function applySettings(){
   if (actx){ master.gain.value=(opt.master/100)*0.8; musicGain.gain.value=(opt.music/100)*0.7; sfxGain.gain.value=(opt.sfx/100); }
 }
 function saveSettings(){ localStorage.setItem("hotdogNights.opt", JSON.stringify(opt)); applySettings(); }
-function openSettings(from){ audioInit(); settingsFrom=from; settingsSel=0; numDown={}; state="settings"; }
+function openSettings(from){ audioInit(); settingsFrom=from; settingsSel=0; chordBuf=""; state="settings"; }
 function handleSettingsKey(e){
   if (cheatConsoleOpen) return;                       // the DOM cheat input owns the keyboard while open
   const k=e.key;
-  if (["4","5","6"].includes(k)){ numDown[k]=true;    // secret chord: hold 4 + 5 + 6 to open the console
-    if (numDown["4"]&&numDown["5"]&&numDown["6"]) openCheatConsole(); e.preventDefault(); return; }
+  if (/^[0-9]$/.test(k)){ chordBuf=(chordBuf+k).slice(-3);   // secret code: type 4 5 6 in order to open the console
+    if (chordBuf==="456") openCheatConsole(); e.preventDefault(); return; }
   if (k==="h"||k==="H"){ openHelp("settings"); e.preventDefault(); return; }
   if (k==="ArrowUp") settingsSel=(settingsSel-1+SETTINGS.length)%SETTINGS.length;
   else if (k==="ArrowDown") settingsSel=(settingsSel+1)%SETTINGS.length;
@@ -1219,10 +1218,13 @@ function drawSettings(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
     if(isTouch){ const setv=d=>{ settingsSel=i; opt[s.k]=Math.max(s.min,Math.min(s.max,opt[s.k]+d*s.step)); applySettings(); };
       pushBtn(uiButtons, W/2-22, y-19, 36, 30, "-", ()=>setv(-1)); drawBtn(uiButtons[uiButtons.length-1]);
       pushBtn(uiButtons, W/2+188, y-19, 36, 30, "+", ()=>setv(1)); drawBtn(uiButtons[uiButtons.length-1]); } });
-  // subtle secret "?" - tap/click shows only "456..."; triple-tap opens the cheat console (touch path)
-  const qx=W-44, qy=112; qHot={x:qx-16, y:qy-22, w:36, h:34};
-  ctx.textAlign="center"; ctx.fillStyle="rgba(122,122,154,0.40)"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText("?", qx, qy);
-  ctx.strokeStyle="rgba(122,122,154,0.22)"; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(qx,qy-7,15,0,7); ctx.stroke();
+  // visible secret "?" button - tap/click shows only "456..."; triple-tap opens the console (touch path)
+  const qx=W-46, qy=120, qr=18, pulse=0.6+Math.sin(performance.now()/360)*0.4; qHot={x:qx-qr, y:qy-qr, w:qr*2, h:qr*2};
+  ctx.save();
+  ctx.fillStyle="rgba(20,28,46,0.92)"; ctx.beginPath(); ctx.arc(qx,qy,qr,0,7); ctx.fill();
+  ctx.globalAlpha=pulse; ctx.strokeStyle="#34e7ff"; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(qx,qy,qr,0,7); ctx.stroke();
+  ctx.globalAlpha=1; ctx.fillStyle="#34e7ff"; ctx.font="bold 24px Trebuchet MS"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText("?", qx, qy+1); ctx.textBaseline="alphabetic"; ctx.restore();
   if(isTouch) pushBtn(uiButtons, qHot.x, qHot.y, qHot.w, qHot.h, "", ()=>{ showQHint(); if(tripleTap("q")) openCheatConsole(); });
   ctx.textAlign="center";
   if(isTouch){ pushBtn(uiButtons, W/2-150, H-66, 140, 40, "SAVE & BACK", ()=>{ saveSettings(); state=settingsFrom; }); drawBtn(uiButtons[uiButtons.length-1]);
