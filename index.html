@@ -26,11 +26,16 @@
   #nm { position:fixed; left:50%; top:46%; transform:translate(-50%,-50%); width:280px; padding:10px 12px;
     font:bold 20px "Trebuchet MS",sans-serif; text-align:center; background:#101018; color:#fff;
     border:2px solid #34e7ff; border-radius:6px; display:none; z-index:10; outline:none; }
+  /* Hidden cheat-code console, opened from Options via 4+5+6 (or triple-tap the secret "?"). */
+  #cc { position:fixed; left:50%; top:62%; transform:translate(-50%,-50%); width:300px; padding:10px 12px;
+    font:bold 18px "Trebuchet MS",sans-serif; text-align:center; background:#101018; color:#f4d03f;
+    border:2px solid #f4d03f; border-radius:6px; display:none; z-index:11; outline:none; letter-spacing:3px; }
 </style>
 </head>
 <body>
 <div id="wrap"><canvas id="game" width="960" height="600"></canvas></div>
 <input id="nm" type="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" maxlength="14" placeholder="your name">
+<input id="cc" type="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" maxlength="10" placeholder="enter code">
 <div id="hint">WASD / on-screen sticks &middot; aim+fire &middot; 1-4 weapons &middot; P pause (O options) &middot; M mute</div>
 <script>
 (() => {
@@ -49,20 +54,36 @@ const lctx = lcv.getContext("2d");
 //============================================================ INPUT
 const keys = {};
 let mouseX = W/2, mouseY = H/2, firing = false;
+// Triple-tap detector for keyboard cheat codes (J / 7 / M). Ignores auto-repeat; window resets per key.
+const taps = {};
+function tripleTap(key){ const now=performance.now(); const a=taps[key]||(taps[key]=[]);
+  a.push(now); while(a.length && now-a[0]>700) a.shift(); return a.length>=3; }
 addEventListener("keydown", e => {
   if (state === "name"){ handleNameKey(e); return; }
   if (state === "settings"){ handleSettingsKey(e); return; }
   if (state === "charselect"){ handleCharKey(e); return; }
   if (state === "difficulty"){ handleDiffKey(e); return; }
-  if (state === "help"){ if(["Enter","Escape","Backspace"," ","h","H"].includes(e.key)) state=helpFrom; e.preventDefault(); return; }
+  if (state === "help"){ if(["Enter"," "].includes(e.key)) helpAdvance();
+    else if(["Escape","Backspace","h","H"].includes(e.key)) state=helpFrom; e.preventDefault(); return; }
   const k = e.key.toLowerCase(); keys[k] = true;
   if (/^[a-z]$/.test(k)){ cheatBuf=(cheatBuf+k).slice(-8); if(cheatBuf.endsWith("moonk")) activateMoonk(); }
   if ([" ","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) e.preventDefault();
   if (k === "g" && state === "win"){ startGodLevel(); return; }
-  if (k === "h" && (state === "title" || state === "pause")){ helpFrom=state; state="help"; return; }
+  if (k === "h" && (state === "title" || state === "pause")){ openHelp(state); return; }
+  // ---- in-game cheat codes (triple-tap, play only) ----
+  if (k === "j" && state === "play" && !e.repeat){
+    if (tripleTap("j")){ taps.j=[]; if(!cheats.jump) activateCheat("jump"); else doJump(); }
+    else if (cheats.jump) doJump(); }
+  if (k === "7" && state === "play" && !e.repeat && tripleTap("7")){ taps["7"]=[]; activateCheat("doctor"); }
   if (k === "enter") startOrAdvance();
   if (k === "p" || k === "escape") togglePause();
-  if (k === "m") muted = !muted;
+  if (k === "m"){
+    if (state === "play" && !e.repeat){
+      if (!(taps.m && taps.m.length)) muteSeq = muted;   // remember mute state before a potential 3-tap burst
+      muted = !muted;
+      if (tripleTap("m")){ taps.m=[]; muted = muteSeq; activateCheat("minions"); }   // restore mute, fire minions
+    } else muted = !muted;
+  }
   if (k === "s" && state === "title") openSettings("title");
   if (k === "o" && state === "pause") openSettings("pause");
   if (k === "f") toggleFullscreen();
@@ -73,11 +94,16 @@ function handleNameKey(e){
   if (e.key === "Backspace"){ playerName = playerName.slice(0,-1); e.preventDefault(); return; }
   if (e.key.length === 1 && /[A-Za-z0-9 _!\-]/.test(e.key) && playerName.length < 14){ playerName += e.key; e.preventDefault(); }
 }
-addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false;
+  if (["4","5","6"].includes(e.key)) numDown[e.key] = false; });
 function canvasPos(e){ const r = cv.getBoundingClientRect();
   return { x:(e.clientX-r.left)*(W/r.width), y:(e.clientY-r.top)*(H/r.height) }; }
 cv.addEventListener("mousemove", e => { const p = canvasPos(e); mouseX = p.x; mouseY = p.y; });
-cv.addEventListener("mousedown", () => { audioInit(); if (state==="play") firing = true; else startOrAdvance(); });
+cv.addEventListener("mousedown", e => { audioInit();
+  if (state==="settings"){ const p=canvasPos(e);   // secret "?" : tap shows hint, triple-tap opens console
+    if (qHot && p.x>=qHot.x && p.x<=qHot.x+qHot.w && p.y>=qHot.y && p.y<=qHot.y+qHot.h){ showQHint(); if(tripleTap("q")) openCheatConsole(); }
+    return; }
+  if (state==="play") firing = true; else startOrAdvance(); });
 addEventListener("mouseup", () => firing = false);
 cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { if (state==="play" && player.weapons.length>1){ e.preventDefault();
@@ -107,7 +133,8 @@ function handleTouchStart(id,p){
     return; }
   const b=hitBtn(uiButtons,p); if(b){ b.fn(); return; }
   if(state==="name"){ if(nm) nm.focus(); return; }
-  if(state==="help"){ state=helpFrom; return; }
+  if(state==="help"){ helpAdvance(); return; }
+  if(state==="settings") return;   // settings is button-driven (sliders, HELP, secret "?")
   if(["title","story","intro","over","godwin"].includes(state)) startOrAdvance();
 }
 function handleTouchMove(id,p){ if(id===touchMove.id) stickSet(touchMove,p); if(id===touchAim.id) stickSet(touchAim,p); }
@@ -126,6 +153,17 @@ function confirmName(){ if(playerName.trim()){ playerName=playerName.trim(); loc
 function syncNameInput(){ if(!isTouch||!nm) return;
   if(state==="name" && !nmShown){ nm.style.display="block"; nm.value=playerName; setTimeout(()=>nm.focus(),0); nmShown=true; }
   else if(state!=="name" && nmShown){ nm.style.display="none"; nm.blur(); nmShown=false; } }
+// Cheat-code console (Options: 4+5+6, or triple-tap the secret "?"). Works for keyboard + touch.
+const cc = document.getElementById("cc");
+function openCheatConsole(){ if(cheatConsoleOpen) return; cheatConsoleOpen=true; numDown={};
+  if(cc){ cc.value=""; cc.style.display="block"; setTimeout(()=>cc.focus(),0); } audioInit(); sfx.pop(); }
+function closeCheatConsole(){ cheatConsoleOpen=false; if(cc){ cc.style.display="none"; cc.blur(); } }
+function submitCheatConsole(){ const code=(cc?cc.value:"").trim().toUpperCase(); closeCheatConsole();
+  if(["JUMP","DOCTOR","MINIONS","MOONK"].includes(code)) activateCheat(code.toLowerCase());
+  else banner={t:2.0, big:"INVALID CODE", small: code?('"'+code+'"'):"type a real one"}; }
+if(cc){ cc.addEventListener("keydown", e=>{
+  if(e.key==="Enter"){ e.stopPropagation(); e.preventDefault(); submitCheatConsole(); }
+  else if(e.key==="Escape"){ e.stopPropagation(); e.preventDefault(); closeCheatConsole(); } }); }
 function drawTouchSticks(){ ctx.save(); ctx.lineWidth=3;
   if(touchMove.active){ ctx.strokeStyle="rgba(52,231,255,0.35)"; ctx.beginPath(); ctx.arc(touchMove.ox,touchMove.oy,70,0,7); ctx.stroke();
     ctx.fillStyle="rgba(52,231,255,0.45)"; ctx.beginPath(); ctx.arc(touchMove.kx,touchMove.ky,30,0,7); ctx.fill(); }
@@ -216,6 +254,10 @@ const MOONK_OV = { k:"#0a0a0a", h:"#050505", s:"#5a3520", b:"#111827", p:"#07090
 const SP_PIG = ["..aaa..",".aaaaa.","asksksa","asssssa","aa.s.aa",".l...l."];
 // PHAT GLIZZY = Frankie's demon spawn. Tints SP_HOTDOG fiery gold.
 const GLIZZY_OV = { o:"#2a0f00", d:"#ff5a1e", r:"#ff8c1a", w:"#fff2cf", n:"#f4d03f", y:"#ffffff", t:"#ff3b3b", l:"#7a3a00" };
+// Health potion: cyan-glass bottle, red liquid, white "+" cross. Clearly different from the yellow ammo crate.
+const SP_POTION = ["..lll..","..lll..",".ccccc.","crrwrrc","crwwwrc","crrwrrc","crrrrrc",".ccccc.","..ccc.."];
+// Friendly MINION ("glizzy goon"): a teal-tinted little person summoned by the MINIONS cheat.
+const FRIEND_OV = { k:"#062018", b:"#1de9b6", s:"#bfffe9", h:"#0a3a2e", p:"#0a3a2e" };
 function drawSprite(grid, cx, cy, scale, flip=1, ov=null){
   const gw=grid[0].length, gh=grid.length, ox=cx-(gw*scale)/2, oy=cy-(gh*scale)/2;
   for (let row=0; row<gh; row++){ const line=grid[row];
@@ -281,21 +323,27 @@ function farPoint(){ let p; for(let i=0;i<60;i++){ p=freeWorldPoint(); if(Math.h
 let state="title", night=1, score=0, storyPage=0;
 let best=parseInt(localStorage.getItem("hotdogNights.best")||"0",10);
 let playerName=localStorage.getItem("hotdogNights.name")||"";
-const VERSION="v10";
+const VERSION="v11";
 const player={ x:0,y:0,r:11,hp:100,maxHp:100,speedMul:1,ammoBonus:0,armed:false,aim:-Math.PI/2,lastHit:-10,fireCd:0,ammo:0,flip:1,
-  weapons:[],weapon:0,newWeapon:null,gatSpin:0,
+  weapons:[],weapon:0,newWeapon:null,gatSpin:0,jumpCd:0,
   damageMul:1,fireMul:1,resist:1,regen:0,ammoInfinite:false,startAllWeapons:false,moonk:false };
 let boss=null, bullets=[], globs=[], packets=[], parts=[], crates=[], gun=null;
+let potions=[], potionTimer=0;               // health-potion pickups (frequency set per difficulty)
+let friends=[], minionCd=0;                  // MINIONS cheat: friendly goons that fight for you
 // MOONK cheat (type "moonk" or name yourself MOONK), difficulty, and post-win GOD LEVEL state.
 let cheatMoonk=false, cheatBuf="", banner=null;
+const cheats={jump:false, doctor:false};     // unlockable cheats (JUMP dash, DOCTOR fast-heal)
+let cheatConsoleOpen=false, numDown={}, muteSeq=false;  // Options cheat-console + 4+5+6 chord + mute-restore
+let qHot=null;                               // secret "?" hotspot rect in Options
 let god=false, glizzies=[], gremlins=[];
 let glizzler=null, greasePuddles=[];        // god-level final boss + grease hazards
 let combo=0, comboT=0, comboMul=1;           // kill-combo score multiplier
-let helpFrom="title";                        // where the HOW-TO-PLAY screen returns to
+let helpFrom="title", helpPage=0;            // HOW-TO-PLAY screen: where to return + current page
 let bestGod=parseInt(localStorage.getItem("hotdogNights.god")||"0",10);
 let nightTime=0, NIGHT_LEN=80, introTimer=0, crateTimer=0, shake=0;
 const SPEED=2.7;
 const AMMO_MAX=250, START_AMMO=150, CRATE_AMMO=60, NIGHT_REFILL=100;
+const POTION_HEAL=35;                         // HP restored per potion (capped at maxHp - no overheal)
 
 //============================================================ OPTIONS / SETTINGS
 const opt = Object.assign({ master:80, music:55, sfx:90, sens:4, bright:5, shake:1 },
@@ -316,8 +364,13 @@ function applySettings(){
   if (actx){ master.gain.value=(opt.master/100)*0.8; musicGain.gain.value=(opt.music/100)*0.7; sfxGain.gain.value=(opt.sfx/100); }
 }
 function saveSettings(){ localStorage.setItem("hotdogNights.opt", JSON.stringify(opt)); applySettings(); }
-function openSettings(from){ audioInit(); settingsFrom=from; settingsSel=0; state="settings"; }
-function handleSettingsKey(e){ const k=e.key;
+function openSettings(from){ audioInit(); settingsFrom=from; settingsSel=0; numDown={}; state="settings"; }
+function handleSettingsKey(e){
+  if (cheatConsoleOpen) return;                       // the DOM cheat input owns the keyboard while open
+  const k=e.key;
+  if (["4","5","6"].includes(k)){ numDown[k]=true;    // secret chord: hold 4 + 5 + 6 to open the console
+    if (numDown["4"]&&numDown["5"]&&numDown["6"]) openCheatConsole(); e.preventDefault(); return; }
+  if (k==="h"||k==="H"){ openHelp("settings"); e.preventDefault(); return; }
   if (k==="ArrowUp") settingsSel=(settingsSel-1+SETTINGS.length)%SETTINGS.length;
   else if (k==="ArrowDown") settingsSel=(settingsSel+1)%SETTINGS.length;
   else if (k==="ArrowLeft"||k==="ArrowRight"){ const s=SETTINGS[settingsSel], d=(k==="ArrowRight"?1:-1);
@@ -340,10 +393,26 @@ function handleCharKey(e){ const k=e.key;
   e.preventDefault();
 }
 //============================================================ DIFFICULTY
+// ONE SOURCE OF TRUTH for how each mode feels. Every tunable lives here and is read live every
+// frame via curDiff()/cfg(n) - nothing is cached on an enemy, so switching modes / restarting /
+// starting a new night / returning to the menu can NEVER leave stale difficulty values behind.
+//   hpMul/dmgMul/spdMul : Frankie HP, damage YOU take, and Frankie speed
+//   nightScale          : how hard nights ramp (0.6 = gentle, 1.18 = brutal)
+//   teleFromNight       : first night Frankie teleport-slams (6 = never within the 5 nights)
+//   teleRateMul         : >1 = teleports less often, <1 = more often
+//   aggroMul            : packet/glob attack frequency + burst size
+//   crateEvery          : seconds between ammo-crate respawns (lower = more ammo)
+//   potionEvery         : seconds between health-potion respawns (lower = more potions)
 const DIFFS = [
-  {name:"Pussahh jit...",        sub:"BABY MODE - we won't tell anyone",  hpMul:0.55, dmgMul:0.45, spdMul:0.85, col:"#3ddc84"},
-  {name:"Regular",               sub:"the way Frankie intended",          hpMul:1.0,  dmgMul:1.0,  spdMul:1.0,  col:"#34e7ff"},
-  {name:"Do you hate yourself?", sub:"DEMON MODE - Frankie teleports from night 1", hpMul:2.05, dmgMul:1.95, spdMul:1.4, col:"#ff3b3b"},
+  // BABY - the soft mode. Slow, weak Frankie, almost no damage, potions everywhere, never teleports.
+  {name:"Pussahh jit...",        sub:"BABY MODE - we won't tell anyone", col:"#3ddc84",
+   hpMul:0.45, dmgMul:0.35, spdMul:0.78, nightScale:0.6, teleFromNight:6, teleRateMul:1.6, aggroMul:0.6, crateEvery:7,  potionEvery:13},
+  // REGULAR - the intended fight. Tense but fair; teleport slams begin Night 3 (matches the story beat).
+  {name:"Regular",               sub:"the way Frankie intended",         col:"#34e7ff",
+   hpMul:1.0,  dmgMul:1.0,  spdMul:1.0,  nightScale:1.0, teleFromNight:3, teleRateMul:1.0, aggroMul:1.0, crateEvery:10, potionEvery:26},
+  // DEMON - "Do you hate yourself?" Teleports from Night 1, hits hard, fast, potions scarce.
+  {name:"Do you hate yourself?", sub:"DEMON MODE - Frankie teleports from night 1", col:"#ff3b3b",
+   hpMul:2.05, dmgMul:1.95, spdMul:1.48, nightScale:1.18, teleFromNight:1, teleRateMul:0.85, aggroMul:1.35, crateEvery:13, potionEvery:42},
 ];
 let diffSel = parseInt(localStorage.getItem("hotdogNights.diff")||"1",10);
 if(!(diffSel>=0&&diffSel<DIFFS.length)) diffSel=1;
@@ -368,14 +437,81 @@ function activateMoonk(){ if(cheatMoonk) return; cheatMoonk=true; cheatBuf=""; m
   audioInit(); sfx.power();
   if(state==="play"||state==="intro"){ applyMoonkLoadout(); burst(player.x,player.y,40,"#f4d03f",7,0.8,4); }
 }
+//============================================================ GENERAL CHEATS (JUMP / DOCTOR / MINIONS)
+// Routed through one activateCheat() so the triple-tap keys and the Options console share the same code.
+function activateCheat(name){ audioInit();
+  if(name==="moonk"){ activateMoonk(); return true; }
+  if(name==="jump"){ if(!cheats.jump){ cheats.jump=true; sfx.power();
+      banner={t:2.2, big:"CHEAT ACTIVATED: JUMP", small:"tap J (or the JUMP button) to dash like Frankie"}; }
+    doJump(); return true; }
+  if(name==="doctor"){ cheats.doctor=true; player.regen=Math.max(player.regen,16); sfx.power();
+    banner={t:2.2, big:"CHEAT ACTIVATED: DOCTOR", small:"rapid healing online"};
+    burst(player.x,player.y,18,"#3ddc84",5,0.5,3); return true; }
+  if(name==="minions"){ banner={t:2.2, big:"CHEAT ACTIVATED: MINIONS", small:"glizzy goons, attack!"}; spawnMinions(); return true; }
+  return false;
+}
+// JUMP: collision-safe forward dash along the aim. Sweeps in steps and stops before any wall, so it
+// never lands inside geometry or outside the map (border tiles are solid). Cooldown-gated.
+function doJump(){ if(state!=="play" || player.jumpCd>0) return;
+  const dist=160, steps=18, a=player.aim; let gx=player.x, gy=player.y;
+  for(let i=1;i<=steps;i++){ const t=i/steps, nx=player.x+Math.cos(a)*dist*t, ny=player.y+Math.sin(a)*dist*t;
+    if(collides(nx,ny,player.r)) break; gx=nx; gy=ny; }
+  burst(player.x,player.y,14,"#34e7ff",6,0.4,3);     // trail at the takeoff point
+  player.x=gx; player.y=gy;
+  burst(player.x,player.y,18,"#7fffd4",7,0.45,3); shake=Math.max(shake,0.25); sfx.zap();
+  player.jumpCd=1.1;
+}
+// MINIONS: spawn a small squad of friendly goons. Capped count + spawn cooldown + lifespan despawn.
+function spawnMinions(){
+  if(minionCd>0){ banner={t:1.6, big:"GOONS RECHARGING", small:"give them a sec"}; return; }
+  const MAXF=4, n=Math.min(3, MAXF-friends.length);
+  if(n<=0){ banner={t:1.6, big:"SQUAD FULL", small:"4 goons is the limit"}; return; }
+  for(let i=0;i<n;i++){ const a=Math.random()*6.28, d=28+Math.random()*22;
+    friends.push({x:player.x+Math.cos(a)*d, y:player.y+Math.sin(a)*d, r:9, life:13, fireCd:Math.random()*0.3, aim:0}); }
+  minionCd=6; sfx.power(); burst(player.x,player.y,20,"#7fffd4",6,0.5,3);
+}
+// Nearest live hostile to (x,y) - used by friendly goons to pick a target.
+function nearestEnemy(x,y){ let best=null, bd=1e9;
+  const consider=e=>{ if(!e||e.dead) return; const d=Math.hypot(e.x-x,e.y-y); if(d<bd){ bd=d; best=e; } };
+  consider(boss); consider(glizzler);
+  for(const g of glizzies) consider(g);
+  for(const pk of packets) if(!pk.dead) consider(pk);
+  for(const gm of gremlins) if(!gm.dead) consider(gm);
+  return best;
+}
+// Friendly goons: hover near the player, chase/strafe the nearest enemy, and fire friendly lasers into
+// the shared bullet pool (those already damage enemies and never the player). They despawn on a timer.
+function updateFriends(dt,f){
+  if(minionCd>0) minionCd-=dt;
+  for(const fr of friends){ fr.life-=dt; fr.fireCd-=dt;
+    const tgt=nearestEnemy(fr.x,fr.y);
+    if(tgt){ const a=Math.atan2(tgt.y-fr.y,tgt.x-fr.x), dist=Math.hypot(tgt.x-fr.x,tgt.y-fr.y);
+      const want = dist>150?1 : dist<70?-0.7 : 0;                 // hold mid-range
+      moveEntity(fr, Math.cos(a)*1.7*want*f, Math.sin(a)*1.7*want*f);
+      fr.aim=a;
+      if(fr.fireCd<=0){ const aa=a+(Math.random()-0.5)*0.12;
+        bullets.push({x:fr.x+Math.cos(aa)*14,y:fr.y+Math.sin(aa)*14,vx:Math.cos(aa)*9,vy:Math.sin(aa)*9,life:0.7,dmg:0.6,pierce:0,color:"#7fffd4"});
+        fr.fireCd=0.45; if(Math.random()<0.5) sfx.mg(); }
+    }
+    const pa=Math.atan2(player.y-fr.y,player.x-fr.x), pd=Math.hypot(player.x-fr.x,player.y-fr.y);  // never stray too far
+    if(pd>210) moveEntity(fr, Math.cos(pa)*1.9*f, Math.sin(pa)*1.9*f);
+  }
+  friends=friends.filter(fr=>fr.life>0);
+}
+//============================================================ HELP / HINT helpers
+function openHelp(from){ helpFrom=from; helpPage=0; state="help"; }
+function helpAdvance(){ helpPage++; if(helpPage>=helpPages().length) state=helpFrom; }
+function showQHint(){ banner={t:3.0, big:"456...", small:""}; }   // the only thing the secret "?" reveals
 applySettings();
 
-function cfg(n){ const d=curDiff(); return {
-  speed: (1.15 + 0.2*(n-1))*d.spdMul,
-  hp: Math.round((16 + (n-1)*13)*d.hpMul),
-  contact: 14 + 3*(n-1),
-  packets: n>=2, packetEvery: Math.max(3.2, 6-0.6*(n-1)), packetBurst: n>=4?3:2,
-  shoot: n>=3, shootEvery: Math.max(2.2, 4.2-0.55*(n-1)), shootSpread: n>=5,
+// Per-night enemy config, fully derived from the active difficulty. Called live every frame.
+function cfg(n){ const d=curDiff(); const ramp=(n-1)*d.nightScale; return {
+  speed: (1.15 + 0.2*ramp)*d.spdMul,
+  hp: Math.round((16 + ramp*13)*d.hpMul),
+  contact: 14 + 3*ramp,                                   // base hit; dmgMul applied in hurtPlayer()
+  packets: n>=2, packetEvery: Math.max(3.2, 6-0.6*ramp)/d.aggroMul, packetBurst: (n>=4?3:2)+(d.aggroMul>=1.3?1:0),
+  shoot: n>=3, shootEvery: Math.max(2.2, 4.2-0.55*ramp)/d.aggroMul, shootSpread: n>=5,
+  crateEvery: d.crateEvery, potionEvery: d.potionEvery,
 }; }
 
 const STORY = [
@@ -394,9 +530,10 @@ const BEAT = {
 
 function beginRun(){ const ch=CHARS[charSel]||CHARS[0];
   player.maxHp=100+(ch.hpBonus||0); player.speedMul=ch.speedMul||1; player.ammoBonus=ch.ammoBonus||0;
-  player.damageMul=1; player.fireMul=1; player.resist=1; player.regen=0;
+  player.damageMul=1; player.fireMul=1; player.resist=1; player.regen=0; player.jumpCd=0;
   player.ammoInfinite=false; player.startAllWeapons=false; player.moonk=false;
-  god=false; glizzies=[]; gremlins=[]; glizzler=null; greasePuddles=[]; resetCombo();
+  if(cheats.doctor) player.regen=Math.max(player.regen,16);   // DOCTOR cheat persists across runs
+  god=false; glizzies=[]; gremlins=[]; glizzler=null; greasePuddles=[]; friends=[]; minionCd=0; resetCombo();
   night=1; score=0; player.hp=player.maxHp; player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0;
   startNight(1); if(cheatMoonk) applyMoonkLoadout(); state="intro"; introTimer=2.6; }
 function unlockAllWeapons(label){ player.weapons=["pistol","smg","shotgun","plasma"]; player.weapon=3;
@@ -405,7 +542,7 @@ function grantFor(n){ const map={2:"smg",3:"shotgun",4:"plasma"}; const id=map[n
   if(!player.weapons.includes(id)){ player.weapons.push(id); player.weapon=player.weapons.length-1;
     player.newWeapon={name:WEAPONS[id].name, key:player.weapons.length}; } }
 function startNight(n){
-  god=false; glizzies=[]; gremlins=[]; glizzler=null; greasePuddles=[]; resetCombo();
+  god=false; glizzies=[]; gremlins=[]; glizzler=null; greasePuddles=[]; friends=[]; minionCd=0; resetCombo();
   night=n; const c=cfg(n); buildMap();
   player.x=22*TS+TS/2; player.y=16*TS+TS/2; player.fireCd=0; player.newWeapon=null; player.lastHit=-10;
   if(n===1){ player.armed=false; player.weapons=[]; player.weapon=0; player.ammo=0; gun={x:36*TS+TS/2,y:7*TS+TS/2,t:0}; }
@@ -417,7 +554,16 @@ function startNight(n){
   boss={ x:p.x,y:p.y,r:20,hp:c.hp,maxHP:c.hp,wobble:Math.random()*6,growlT:1,flip:1,
          atkP:c.packetEvery*0.7, atkS:c.shootEvery, tele:0, enraged:false, hitFlash:0, dead:false,
          tpT:rand(4.5,7.5), tpWarn:0, tpTarget:null };
-  bullets=[]; globs=[]; packets=[]; parts=[]; crates=[]; crateTimer=6; nightTime=0; shake=0;
+  bullets=[]; globs=[]; packets=[]; parts=[]; crates=[]; potions=[];
+  crateTimer=c.crateEvery*0.6; potionTimer=c.potionEvery*0.6; nightTime=0; shake=0;
+  // Baby mode: a little roast so you remember you picked the soft option.
+  if(diffSel===0 && !cheatMoonk){ const ROASTS=[
+    "we put a leash on Frankie. you're welcome.",
+    "Frankie skipped leg day. just for you.",
+    "training wheels bolted on. pedal away.",
+    "Frankie's barely trying - kinda like you.",
+    "potions everywhere. sip sip, champ."];
+    banner={t:3.2, big:"BABY MODE", small:ROASTS[(night-1)%ROASTS.length]}; }
 }
 function startOrAdvance(){ audioInit();
   if(state==="title"){ state="name"; }
@@ -495,7 +641,8 @@ function startGodLevel(){
   else { player.ammo=AMMO_MAX; player.hp=player.maxHp; }
   player.weapons=["pistol","smg","shotgun","plasma","pmg"]; player.weapon=4;
   player.newWeapon={name:"PLASMA MINIGUN", key:"5"};
-  boss=null; bullets=[]; globs=[]; packets=[]; parts=[]; crates=[]; gremlins=[]; crateTimer=5; nightTime=0; shake=0;
+  boss=null; bullets=[]; globs=[]; packets=[]; parts=[]; crates=[]; gremlins=[]; potions=[]; friends=[]; minionCd=0;
+  crateTimer=5; potionTimer=d.potionEvery*0.6; nightTime=0; shake=0;
   glizzler=null; greasePuddles=[]; resetCombo();
   glizzies=[];
   const hp=Math.round(95*d.hpMul);
@@ -524,6 +671,7 @@ function fireGlobs(c,enr){ const base=Math.atan2(player.y-boss.y, player.x-boss.
 function update(dt){
   const f=dt*60;
   player.fireCd=Math.max(0,player.fireCd-dt); shake=Math.max(0,shake-dt);
+  if(player.jumpCd>0) player.jumpCd-=dt;
   if(touchAim.active){ player.aim=touchAim.ang;        // touch: right stick aims (and fires)
     aimPt.x=(player.x-camX)+Math.cos(player.aim)*130; aimPt.y=(player.y-camY)+Math.sin(player.aim)*130; }
   else if(!isTouch){ const t=Math.min(1, aimLerp*f);    // mouse: crosshair eases toward cursor (sensitivity)
@@ -597,14 +745,15 @@ function update(dt){
 
   // boss
   if(!god && boss && !boss.dead){
-    const c=cfg(night); const demon=diffSel===2; boss.hitFlash=Math.max(0,boss.hitFlash-dt); boss.wobble+=dt*8;
+    const c=cfg(night); const d=curDiff(); const demon=diffSel===2; boss.hitFlash=Math.max(0,boss.hitFlash-dt); boss.wobble+=dt*8;
     if(nightTime>=NIGHT_LEN && !boss.enraged){ boss.enraged=true; sfx.growl(1); shake=0.4; }
     const enr=boss.enraged;
     boss.growlT-=dt;
     if(boss.growlT<=0){ const d=Math.hypot(boss.x-player.x,boss.y-player.y);
       const v=Math.max(0.12,0.7*(1-d/460)); sfx.growl(enr?Math.min(1,v+0.2):v); boss.growlT=(enr?1.0:1.7)+Math.random(); }
-    // teleport-slam: hard nights (>=3) or ANY Demon night. Fair purple-ring telegraph, then a blink-in slam.
-    if(night>=3 || demon){ const m=enr?0.7:1,
+    // teleport-slam: starts on difficulty.teleFromNight (Baby never, Regular N3, Demon N1). teleRateMul
+    // stretches/compresses the cadence. Fair purple-ring telegraph, then a blink-in slam.
+    if(night >= d.teleFromNight){ const m=(enr?0.7:1)*d.teleRateMul,
       lo=Math.max(2.6,(demon?4:5.5)-0.3*(night-3))*m, hi=Math.max(4.2,(demon?6.5:9)-0.4*(night-3))*m;
       if(stepTeleport(boss,dt,{every:[lo,hi],warn:0.85,range:[70,150],dmg:Math.min(34,c.contact*1.3),slamR:16})) return; }
     if(boss.tpWarn<=0){
@@ -616,11 +765,11 @@ function update(dt){
         if(nightTime-player.lastHit>0.8){ if(hurtPlayer(c.contact,0.4)) return;
           burst(player.x,player.y,10,"#ff2d2d",4,0.4,3);
           const ka=Math.atan2(player.y-boss.y,player.x-boss.x); moveEntity(player,Math.cos(ka)*24,Math.sin(ka)*24); } }
-      if(c.packets){ boss.atkP-=dt; if(boss.atkP<=0){ const n=c.packetBurst+(enr?1:0)+(demon?1:0);
-        for(let i=0;i<n && packets.length<14;i++){ const a=Math.random()*6.28, d=24+Math.random()*16;
-          packets.push({x:boss.x+Math.cos(a)*d,y:boss.y+Math.sin(a)*d,r:9,dead:false,wob:Math.random()*6}); }
-        sfx.pop(); boss.atkP=c.packetEvery*(enr?0.6:1)*(demon?0.75:1); } }
-      if(c.shoot){ if(boss.tele>0){ boss.tele-=dt; if(boss.tele<=0){ fireGlobs(c,enr); boss.atkS=c.shootEvery*(enr?0.6:1)*(demon?0.75:1); } }
+      if(c.packets){ boss.atkP-=dt; if(boss.atkP<=0){ const n=c.packetBurst+(enr?1:0);   // demon burst folded into cfg
+        for(let i=0;i<n && packets.length<14;i++){ const a=Math.random()*6.28, off=24+Math.random()*16;
+          packets.push({x:boss.x+Math.cos(a)*off,y:boss.y+Math.sin(a)*off,r:9,dead:false,wob:Math.random()*6}); }
+        sfx.pop(); boss.atkP=c.packetEvery*(enr?0.6:1); } }
+      if(c.shoot){ if(boss.tele>0){ boss.tele-=dt; if(boss.tele<=0){ fireGlobs(c,enr); boss.atkS=c.shootEvery*(enr?0.6:1); } }
         else { boss.atkS-=dt; if(boss.atkS<=0) boss.tele=0.6; } }
     }
   }
@@ -643,10 +792,18 @@ function update(dt){
   // GOD LEVEL: PHAT GLIZZYS + pig-in-a-blanket gremlins
   if(god){ if(updateGod(dt,f)) return; }
 
-  // ammo crates
-  if(player.armed){ crateTimer-=dt; if(crateTimer<=0 && crates.length<2){ const p=freeWorldPoint(); crates.push({x:p.x,y:p.y}); crateTimer=10; }
+  // ammo crates (respawn cadence is difficulty-driven)
+  if(player.armed){ crateTimer-=dt; if(crateTimer<=0 && crates.length<2){ const p=freeWorldPoint(); crates.push({x:p.x,y:p.y}); crateTimer=cfg(night).crateEvery; }
     for(let i=crates.length-1;i>=0;i--){ const cr=crates[i];
       if(Math.hypot(cr.x-player.x,cr.y-player.y)<26){ player.ammo=Math.min(AMMO_MAX,player.ammo+CRATE_AMMO); crates.splice(i,1); sfx.ammo(); burst(player.x,player.y,12,"#f4d03f",4,0.4,3); } } }
+
+  // health potions - spawn like ammo, frequency by difficulty (Baby common, Demon rare). Caps at maxHp (no overheal).
+  potionTimer-=dt; if(potionTimer<=0 && potions.length<2){ const p=freeWorldPoint(); potions.push({x:p.x,y:p.y}); potionTimer=cfg(night).potionEvery; }
+  for(let i=potions.length-1;i>=0;i--){ const po=potions[i];
+    if(Math.hypot(po.x-player.x,po.y-player.y)<26){ player.hp=Math.min(player.maxHp, player.hp+POTION_HEAL); potions.splice(i,1); sfx.pickup(); burst(player.x,player.y,16,"#ff5c7a",4,0.5,3); } }
+
+  // friendly goons (MINIONS cheat) - works in both normal nights and the god level
+  if(friends.length || minionCd>0) updateFriends(dt,f);
 
   // particles + clock + combo decay
   for(const p of parts){ p.x+=p.vx*f; p.y+=p.vy*f; p.vx*=0.92; p.vy*=0.92; p.life-=dt; }
@@ -751,6 +908,7 @@ function render(){
     ctx.save(); ctx.globalAlpha=a; ctx.fillStyle="#160c00"; ctx.beginPath(); ctx.ellipse(x,y,gp.r,gp.r*0.62,0,0,7); ctx.fill();
     ctx.fillStyle="#3a2800"; ctx.beginPath(); ctx.ellipse(x,y,gp.r*0.66,gp.r*0.4,0,0,7); ctx.fill(); ctx.restore(); }
   for(const cr of crates) drawSprite(SP_CRATE, cr.x-camX, cr.y-camY, 4);
+  for(const po of potions){ const bob=Math.sin(performance.now()/300+po.x)*2; drawSprite(SP_POTION, po.x-camX, po.y-camY-bob, 4); }
   if(gun){ const bob=Math.sin(gun.t*4)*4; drawSprite(SP_GUN, gun.x-camX, gun.y-camY-bob, 4); }
 
   // packets
@@ -781,6 +939,10 @@ function render(){
       if(glizzler.hitFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,glizzler.hitFlash*6); ctx.fillStyle="#fff"; ctx.fillRect(gx-40,gy-70,80,132); ctx.restore(); }
       teleWarnRing(glizzler); }
   }
+
+  // friendly goons (MINIONS cheat) - little teal fighters; flicker as they're about to despawn
+  for(const fr of friends){ if(fr.life<2 && Math.floor(performance.now()/120)%2) continue;
+    drawSprite(SP_PLAYER, fr.x-camX, fr.y-camY, 2.4, (fr.aim&&Math.cos(fr.aim)<0)?-1:1, FRIEND_OV); }
 
   // player
   const pov = cheatMoonk ? MOONK_OV : CHARS[charSel];
@@ -825,6 +987,8 @@ function render(){
       ctx.fillStyle="#fff2cf"; ctx.fillRect(gx-18,gy-BS*5-2,8,8); ctx.fillRect(gx+10,gy-BS*5-2,8,8); } }
   if(gun) glow(gun.x-camX, gun.y-camY, 60, "rgba(52,231,255,0.55)");
   for(const cr of crates) glow(cr.x-camX, cr.y-camY, 30, "rgba(244,208,63,0.5)");
+  for(const po of potions) glow(po.x-camX, po.y-camY, 28, "rgba(255,80,110,0.55)");
+  for(const fr of friends) glow(fr.x-camX, fr.y-camY, 22, "rgba(45,233,182,0.45)");
   for(const b of bullets){ const bx=b.x-camX,by=b.y-camY; ctx.fillStyle="#fff"; ctx.fillRect(bx-2,by-2,4,4); glow(bx,by,10,b.color); }
   ctx.restore();
 
@@ -846,39 +1010,51 @@ function render(){
   if(state==="help") drawHelp();
   if(banner) drawBanner();
 }
-function drawHelp(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
-  ctx.fillStyle="#34e7ff"; ctx.font="bold 40px Trebuchet MS"; ctx.fillText("HOW TO PLAY", W/2, 78);
-  const rows = isTouch ? [
-    ["Move","left on-screen stick"],
-    ["Aim + Fire","right stick (drag to aim, hold to shoot)"],
-    ["Switch weapon","tap the weapon slots in the HUD"],
-    ["Pause / Options","the II button (top-right)"],
-    ["",""],
-    ["GET THE GUN","Night 1: walk to the LASER TAG ARENA and grab the blaster"],
-    ["Survive","5 nights. Frankie wakes hungrier each night - on Night 3+ he TELEPORTS (purple ring = he's about to slam there)"],
-    ["GOD LEVEL","beat all 5 nights, then choose GOD LEVEL: 5 PHAT GLIZZYS, then THE BIG GLIZZLER. Plasma minigun included."],
-    ["Combo","chain kills fast for up to x12 score"],
-  ] : [
-    ["Move","W A S D  /  Arrow keys"],
-    ["Aim","mouse"],
-    ["Fire","click  /  Spacebar  (hold for the miniguns)"],
-    ["Switch weapon","number keys 1 - 5"],
-    ["Pause","P     Options: O     Mute: M     Fullscreen: F"],
-    ["",""],
-    ["GET THE GUN","Night 1: reach the LASER TAG ARENA and grab the blaster"],
-    ["Survive","5 nights. Night 3+ Frankie TELEPORTS - the purple ring shows where he'll slam, so move"],
-    ["Difficulty","Baby / Regular / Demon (Demon: Frankie teleports from Night 1)"],
-    ["GOD LEVEL","beat all 5 nights, then press G: 5 PHAT GLIZZYS + THE BIG GLIZZLER, with the plasma minigun"],
-    ["Combo","chain kills fast for up to x12 score"],
+// HOW-TO-PLAY content, split into short labelled sections across a few pages. Controls adapt to input type.
+function helpPages(){
+  const controls = isTouch ? [
+    "Move: left on-screen stick.",
+    "Aim + Fire: right stick - drag to aim, hold to shoot.",
+    "Weapons: tap the slots in the HUD. Pause/Options: the II button." ] : [
+    "Move: W A S D or Arrow keys.   Aim: mouse.",
+    "Fire: click or Spacebar (hold for the miniguns).",
+    "Weapons: 1-5.   Pause: P.   Options: O.   Mute: M.   Fullscreen: F." ];
+  return [
+    [ ["OBJECTIVE", ["Survive 5 nights at Xtreme Action Park. Each night runs 12 AM to 6 AM - outlast the clock to reach the next one.",
+                     "Make it through Night 5 to put Frankie down for good."]],
+      ["CONTROLS", controls] ],
+    [ ["ENEMIES", ["FRANKIE THE HOTDOG hunts you all night - faster and angrier each night, and he ENRAGES once 6 AM passes.",
+                   "From Night 3 (Night 1 on Demon) he TELEPORTS: a purple ring shows where he'll slam down, so move.",
+                   "He also throws crawling ketchup packets and spits ketchup globs - shoot them down or dodge."]] ],
+    [ ["PICKUPS", ["Yellow crates refill ammo. Red potions restore health. Up to 2 of each are on the map and they respawn over time - grab them between fights."]],
+      ["HEALTH", ["You start at 100 HP. Frankie, packets, and globs all hurt you - how much depends on difficulty.",
+                  "HP does not regenerate on its own: grab potions, and surviving a night heals you a little."]] ],
+    [ ["DIFFICULTY MODES", ["BABY: slow, weak Frankie and tons of potions - he never really teleports.",
+                            "REGULAR: the intended fight, tense but fair. Teleport slams start Night 3.",
+                            "DEMON ('Do you hate yourself?'): teleports from Night 1, hits hard, potions are scarce."]],
+      ["SURVIVAL TIPS", ["Keep moving - a stationary target is ketchup. Watch for the purple ring and bail before the slam.",
+                         "Rush the LASER TAG ARENA on Night 1 to grab the gun. Grab potions as you pass; don't hoard."]] ],
   ];
-  let y=132; ctx.font="16px Trebuchet MS";
-  for(const [k,v] of rows){ if(!k && !v){ y+=10; continue; }
-    ctx.textAlign="right"; ctx.fillStyle="#f4d03f"; ctx.font="bold 16px Trebuchet MS"; ctx.fillText(k, W/2-16, y);
-    ctx.textAlign="left"; ctx.fillStyle="#cfcfe0"; ctx.font="15px Trebuchet MS";
-    wrap(v, W/2-40).forEach((ln,i)=>ctx.fillText(ln, W/2+16, y+i*19)); y += 19*Math.max(1,wrap(v,W/2-40).length)+8; }
+}
+function drawHelp(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
+  const pages=helpPages(), pg=pages[Math.min(helpPage,pages.length-1)];
+  ctx.fillStyle="#34e7ff"; ctx.font="bold 38px Trebuchet MS"; ctx.fillText("HOW TO PLAY", W/2, 64);
+  ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("page "+(helpPage+1)+" / "+pages.length, W/2, 86);
+  const L=W/2-300; let y=132;
+  for(const [title,lines] of pg){
+    ctx.textAlign="left"; ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(title, L, y); y+=30;
+    ctx.fillStyle="#cfcfe0"; ctx.font="16px Trebuchet MS";
+    for(const line of lines){ for(const ln of wrap(line,600)){ ctx.fillText(ln, L, y); y+=22; } y+=4; }
+    y+=18;
+  }
   ctx.textAlign="center";
-  if(isTouch){ pushBtn(uiButtons, W/2-80, H-58, 160, 42, "BACK", ()=>{ state=helpFrom; }); drawBtn(uiButtons[uiButtons.length-1]); }
-  else { ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("press H, ENTER or ESC to go back", W/2, H-30); } }
+  if(isTouch){ const last=helpPage>=pages.length-1;
+    pushBtn(uiButtons, W/2-170, H-58, 150, 42, "BACK", ()=>{ state=helpFrom; });
+    pushBtn(uiButtons, W/2+20, H-58, 150, 42, last?"DONE":"NEXT", ()=>helpAdvance());
+    uiButtons.forEach(drawBtn); }
+  else { ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS";
+    ctx.fillText(helpPage>=pages.length-1 ? "ENTER to finish      ESC / H to go back"
+                                          : "ENTER / SPACE: next page      ESC / H: go back", W/2, H-28); } }
 function drawBanner(){ const a=Math.min(1, banner.t/0.4); ctx.save(); ctx.globalAlpha=a; ctx.textAlign="center";
   ctx.fillStyle="rgba(5,5,12,0.6)"; ctx.fillRect(0,H*0.30,W,86);
   ctx.fillStyle="#f4d03f"; ctx.font="bold 44px Trebuchet MS"; ctx.fillText(banner.big, W/2, H*0.30+44);
@@ -952,7 +1128,8 @@ function drawHUD(){
     ctx.fillStyle=player.ammo>0?"#34e7ff":"#ff3b3b"; ctx.font="bold 18px Trebuchet MS"; ctx.fillText(player.ammoInfinite?"AMMO UNLIMITED":"AMMO "+player.ammo, wx+6, H-19);
   } else { ctx.fillStyle="#ffb74d"; ctx.font="bold 15px Trebuchet MS"; ctx.fillText("> Reach the LASER TAG ARENA and grab the gun!", 300, H-21); }
   if(isTouch && state==="play"){ pushBtn(hudButtons, W-52, 44, 42, 32, "II", togglePause); drawBtn(hudButtons[hudButtons.length-1]);
-    pushBtn(hudButtons, W-100, 44, 42, 32, "[ ]", toggleFullscreen); drawBtn(hudButtons[hudButtons.length-1]); }
+    pushBtn(hudButtons, W-100, 44, 42, 32, "[ ]", toggleFullscreen); drawBtn(hudButtons[hudButtons.length-1]);
+    if(cheats.jump){ pushBtn(hudButtons, W-100, H-118, 88, 44, "JUMP", doJump); drawBtn(hudButtons[hudButtons.length-1]); } }
 }
 function dim(){ ctx.fillStyle="rgba(5,5,12,0.82)"; ctx.fillRect(0,0,W,H); }
 function drawCenter(title,sub,color){ dim(); ctx.textAlign="center";
@@ -963,7 +1140,7 @@ function drawTitle(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
   ctx.fillStyle="#34e7ff"; ctx.font="bold 24px Trebuchet MS"; ctx.fillText(">>  XTREME ACTION PARK  <<", W/2, H/2-42);
   ctx.fillStyle="#cfcfe0"; ctx.font="16px Trebuchet MS"; ctx.fillText("The mascot wakes at midnight. Five nights. One hotdog. Survive.", W/2, H/2+2);
   if(isTouch){ pushBtn(uiButtons, W/2-90, H/2+30, 180, 42, "PLAY", ()=>startOrAdvance());
-    pushBtn(uiButtons, W/2-282, H/2+82, 180, 38, "HOW TO PLAY", ()=>{ helpFrom="title"; state="help"; });
+    pushBtn(uiButtons, W/2-282, H/2+82, 180, 38, "HOW TO PLAY", ()=>openHelp("title"));
     pushBtn(uiButtons, W/2-90, H/2+82, 180, 38, "SETTINGS", ()=>openSettings("title"));
     pushBtn(uiButtons, W/2+102, H/2+82, 180, 38, "FULLSCREEN", ()=>toggleFullscreen()); uiButtons.forEach(drawBtn); }
   else { ctx.fillStyle="#f4d03f"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText(">  ENTER to play       H how to play       S settings       F fullscreen", W/2, H/2+62);
@@ -1042,8 +1219,15 @@ function drawSettings(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
     if(isTouch){ const setv=d=>{ settingsSel=i; opt[s.k]=Math.max(s.min,Math.min(s.max,opt[s.k]+d*s.step)); applySettings(); };
       pushBtn(uiButtons, W/2-22, y-19, 36, 30, "-", ()=>setv(-1)); drawBtn(uiButtons[uiButtons.length-1]);
       pushBtn(uiButtons, W/2+188, y-19, 36, 30, "+", ()=>setv(1)); drawBtn(uiButtons[uiButtons.length-1]); } });
-  if(isTouch){ pushBtn(uiButtons, W/2-70, H-66, 140, 40, "SAVE & BACK", ()=>{ saveSettings(); state=settingsFrom; }); drawBtn(uiButtons[uiButtons.length-1]); }
-  else { ctx.textAlign="center"; ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Up/Down select    Left/Right adjust    ENTER or ESC to go back", W/2, H-40); } }
+  // subtle secret "?" - tap/click shows only "456..."; triple-tap opens the cheat console (touch path)
+  const qx=W-44, qy=112; qHot={x:qx-16, y:qy-22, w:36, h:34};
+  ctx.textAlign="center"; ctx.fillStyle="rgba(122,122,154,0.40)"; ctx.font="bold 22px Trebuchet MS"; ctx.fillText("?", qx, qy);
+  ctx.strokeStyle="rgba(122,122,154,0.22)"; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(qx,qy-7,15,0,7); ctx.stroke();
+  if(isTouch) pushBtn(uiButtons, qHot.x, qHot.y, qHot.w, qHot.h, "", ()=>{ showQHint(); if(tripleTap("q")) openCheatConsole(); });
+  ctx.textAlign="center";
+  if(isTouch){ pushBtn(uiButtons, W/2-150, H-66, 140, 40, "SAVE & BACK", ()=>{ saveSettings(); state=settingsFrom; }); drawBtn(uiButtons[uiButtons.length-1]);
+    pushBtn(uiButtons, W/2+10, H-66, 140, 40, "HOW TO PLAY", ()=>openHelp("settings")); drawBtn(uiButtons[uiButtons.length-1]); }
+  else { ctx.fillStyle="#7a7a9a"; ctx.font="13px Trebuchet MS"; ctx.fillText("Up/Down select    Left/Right adjust    H: How to Play    ENTER or ESC to go back", W/2, H-40); } }
 function drawCharSelect(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
   ctx.fillStyle="#34e7ff"; ctx.font="bold 36px Trebuchet MS"; ctx.fillText("CHOOSE YOUR CHARACTER", W/2, 92);
   const gap=W/(CHARS.length+1);
@@ -1061,6 +1245,7 @@ function drawCharSelect(){ dim(); ctx.textAlign="center"; uiButtons.length=0;
 let last=performance.now();
 function frame(now){ let dt=(now-last)/1000; last=now; dt=Math.min(dt,0.05);
   syncNameInput();
+  if(cheatConsoleOpen && state!=="settings") closeCheatConsole();   // never leave the console hanging
   if(banner){ banner.t-=dt; if(banner.t<=0) banner=null; }
   if(state==="play") update(dt);
   if(state==="intro"){ introTimer-=dt; if(introTimer<=0) state="play"; }
