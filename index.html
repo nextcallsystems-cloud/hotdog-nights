@@ -97,12 +97,12 @@ function handleNameKey(e){
 addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 function canvasPos(e){ const r = cv.getBoundingClientRect();
   return { x:(e.clientX-r.left)*(W/r.width), y:(e.clientY-r.top)*(H/r.height) }; }
-cv.addEventListener("mousemove", e => { const p = canvasPos(e); mouseX = p.x; mouseY = p.y; });
+cv.addEventListener("mousemove", e => { const p = canvasPos(e); mouseX = p.x; mouseY = p.y; usingMouse = true; });
 cv.addEventListener("mousedown", e => { audioInit();
   if (state==="settings"){ const p=canvasPos(e);   // secret "?" : tap shows hint, triple-tap opens console
     if (qHot && p.x>=qHot.x && p.x<=qHot.x+qHot.w && p.y>=qHot.y && p.y<=qHot.y+qHot.h){ showQHint(); if(tripleTap("q")) openCheatConsole(); }
     return; }
-  if (state==="play") firing = true; else startOrAdvance(); });
+  if (state==="play"){ firing = true; usingMouse = true; } else startOrAdvance(); });
 addEventListener("mouseup", () => firing = false);
 cv.addEventListener("contextmenu", e => e.preventDefault());
 cv.addEventListener("wheel", e => { if (state==="play" && player.weapons.length>1){ e.preventDefault();
@@ -110,6 +110,9 @@ cv.addEventListener("wheel", e => { if (state==="play" && player.weapons.length>
 
 //============================================================ TOUCH (phone / iPad)
 const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints>0;
+// Which input is actually in use right now. Touch-capable laptops report isTouch=true even with a
+// mouse, so we can't gate mouse-aim on !isTouch. This flips to true on mouse-move, false on touch.
+let usingMouse = !isTouch;
 const touchMove = {id:null,ox:0,oy:0,kx:0,ky:0,vx:0,vy:0,mag:0,active:false};
 const touchAim  = {id:null,ox:0,oy:0,kx:0,ky:0,ang:0,mag:0,active:false};
 let uiButtons=[], hudButtons=[];   // rebuilt every frame by the draw fns (touch only)
@@ -139,7 +142,7 @@ function handleTouchStart(id,p){
 function handleTouchMove(id,p){ if(id===touchMove.id) stickSet(touchMove,p); if(id===touchAim.id) stickSet(touchAim,p); }
 function handleTouchEnd(id){ if(id===touchMove.id){ touchMove.active=false; touchMove.vx=touchMove.vy=touchMove.mag=0; }
   if(id===touchAim.id){ touchAim.active=false; touchAim.mag=0; } }
-cv.addEventListener("touchstart", e=>{ e.preventDefault(); audioInit(); for(const t of e.changedTouches) handleTouchStart(t.identifier, tpos(t)); }, {passive:false});
+cv.addEventListener("touchstart", e=>{ e.preventDefault(); audioInit(); usingMouse=false; for(const t of e.changedTouches) handleTouchStart(t.identifier, tpos(t)); }, {passive:false});
 cv.addEventListener("touchmove",  e=>{ e.preventDefault(); for(const t of e.changedTouches) handleTouchMove(t.identifier, tpos(t)); }, {passive:false});
 cv.addEventListener("touchend",   e=>{ e.preventDefault(); for(const t of e.changedTouches) handleTouchEnd(t.identifier); }, {passive:false});
 cv.addEventListener("touchcancel",e=>{ for(const t of e.changedTouches) handleTouchEnd(t.identifier); }, {passive:false});
@@ -322,7 +325,7 @@ function farPoint(){ let p; for(let i=0;i<60;i++){ p=freeWorldPoint(); if(Math.h
 let state="title", night=1, score=0, storyPage=0;
 let best=parseInt(localStorage.getItem("hotdogNights.best")||"0",10);
 let playerName=localStorage.getItem("hotdogNights.name")||"";
-const VERSION="v12";
+const VERSION="v13";
 const player={ x:0,y:0,r:11,hp:100,maxHp:100,speedMul:1,ammoBonus:0,armed:false,aim:-Math.PI/2,lastHit:-10,fireCd:0,ammo:0,flip:1,
   weapons:[],weapon:0,newWeapon:null,gatSpin:0,jumpCd:0,
   damageMul:1,fireMul:1,resist:1,regen:0,ammoInfinite:false,startAllWeapons:false,moonk:false };
@@ -673,7 +676,7 @@ function update(dt){
   if(player.jumpCd>0) player.jumpCd-=dt;
   if(touchAim.active){ player.aim=touchAim.ang;        // touch: right stick aims (and fires)
     aimPt.x=(player.x-camX)+Math.cos(player.aim)*130; aimPt.y=(player.y-camY)+Math.sin(player.aim)*130; }
-  else if(!isTouch){ const t=Math.min(1, aimLerp*f);    // mouse: crosshair eases toward cursor (sensitivity)
+  else if(usingMouse){ const t=Math.min(1, aimLerp*f);   // mouse: crosshair eases toward cursor (sensitivity)
     aimPt.x += (mouseX-aimPt.x)*t; aimPt.y += (mouseY-aimPt.y)*t;
     const mwx=aimPt.x+camX, mwy=aimPt.y+camY; player.aim=Math.atan2(mwy-player.y, mwx-player.x); }
   if(Math.cos(player.aim)!==0) player.flip=Math.cos(player.aim)<0?-1:1;
@@ -994,7 +997,7 @@ function render(){
   if(state==="play"||state==="pause") drawReticle();
   cv.style.cursor = (state==="play"||state==="pause") ? "none" : "default";
   drawHUD();
-  if(isTouch && state==="play") drawTouchSticks();
+  if(isTouch && !usingMouse && state==="play") drawTouchSticks();
   if(state==="title") drawTitle();
   if(state==="name") drawName();
   if(state==="charselect") drawCharSelect();
